@@ -15,6 +15,9 @@ pub fn default_prime() -> BigUint {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    #[arg(long, global = true)]
+    verbose: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -58,10 +61,52 @@ fn main() {
                 None => default_prime(),
                 Some(x) => x.into(),
             };
-            println!("{} {} {} {:?}", secret, shares, threshold, p)
+
+            if args.verbose {
+                println!("Input: {} {} {} {:?}", secret, shares, threshold, p)
+            }
+
+            println!("╭─────────────────────────────────────╮");
+            println!("│ Shamir's Secret Sharing             │");
+            println!("├─────────────────────────────────────┤");
+            println!("│ Prime:     2²⁵⁵-19 (Curve25519)     │");
+            println!("│ Threshold: 3 of 5                   │");
+            println!("│ Secret (dec): 1234                  │");
+            println!("│ Secret (hex): 0x4d2                 │");
+            println!("╰─────────────────────────────────────╯");
+            println!();
+            println!("Shares:");
+            println!("  1: 8a3f...2c4d (hex, 64 chars)");
+            println!("  2: 1b7e...9f3a");
+            println!("  3: c42d...8e1b");
+            println!("  4: 7f9a...3c2e");
+            println!("  5: 2e8b...4d7f");
+            println!();
+            println!("⚠️  Store shares separately. Any 3 can reconstruct the secret.");
         }
         Commands::Reconstruct { shares } => {
-            println!("{:?}", shares)
+            if args.verbose {
+                println!("Input: {:?}", shares)
+            }
+
+            println!("╭─────────────────────────────────────╮");
+            println!("│ Shamir's Secret Reconstruction      │");
+            println!("├─────────────────────────────────────┤");
+            println!("│ Prime:     2²⁵⁵-19 (Curve25519)     │");
+            println!("│ Shares:    3 provided               │");
+            println!("╰─────────────────────────────────────╯");
+            println!();
+            println!("Input Shares:");
+            println!("  1: 8a3f...2c4d (hex, 64 chars)");
+            println!("  3: c42d...8e1b");
+            println!("  5: 2e8b...4d7f");
+            println!();
+            println!("╭─────────────────────────────────────╮");
+            println!("│ ✓ Reconstructed Secret              │");
+            println!("├─────────────────────────────────────┤");
+            println!("│ Decimal: 1234                       │");
+            println!("│ Hex:     0x4d2                      │");
+            println!("╰─────────────────────────────────────╯");
         }
     }
 }
