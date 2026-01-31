@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use num_bigint::{BigInt, BigUint};
+use num_bigint::{BigInt, BigUint, RandBigInt};
 
 /// Curve25519 prime: 2^255 - 19 (little-endian bytes)
 pub fn default_prime() -> BigUint {
@@ -61,16 +61,24 @@ fn main() {
             // FreeTerm = secret
             let free_term: BigInt = secret.into();
             // Degree = threshold - 1
-            let degree = BigUint::from(threshold) - BigUint::from(1u64);
+            let degree = threshold - 1;
+            let degreeBigUint = BigUint::from(threshold) - BigUint::from(1usize);
             // Modulus = prime
             let modulus = match prime {
                 None => default_prime(),
                 Some(x) => x.into(),
             };
             // Coefficients = [0; degree]
-            let coefficients: Vec<BigInt>;
+            let mut coefficients: Vec<BigInt> = Vec::new();
             // random generate coefficients
             // Coefficients.iter_mut { c = BigUint.random }
+            let mut rng = rand::thread_rng();
+            let low: BigInt = 0.into();
+
+            while coefficients.len() < degree as usize {
+                let a = rng.gen_bigint_range(&low, &modulus.clone().into());
+                coefficients.push(a);
+            }
             // GenShare = function (x) {
             //      ret = FreeTerm
             //      for (i, value) in Coefficients.iter_mut() {
@@ -83,7 +91,8 @@ fn main() {
             // for each shareValues , print result as hex string
 
             if args.verbose {
-                println!("Input: {} {} {} {:?}", secret, shares, threshold, modulus)
+                println!("Input: {} {} {} {:?}", secret, shares, threshold, modulus);
+                println!("coefficients: {:?}", coefficients)
             }
 
             println!(" Shamir's Secret Sharing        ");
