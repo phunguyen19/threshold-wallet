@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint};
 
 /// Curve25519 prime: 2^255 - 19 (little-endian bytes)
 pub fn default_prime() -> BigUint {
@@ -26,7 +26,7 @@ enum Commands {
     Generate {
         /// The secret need to be generated shares
         #[arg(long)]
-        secret: u64,
+        secret: i64,
 
         /// How many shares
         #[arg(long)]
@@ -57,30 +57,49 @@ fn main() {
             threshold,
             prime,
         } => {
-            let p = match prime {
+            // Build the polynomial P(x)
+            // FreeTerm = secret
+            let free_term: BigInt = secret.into();
+            // Degree = threshold - 1
+            let degree = BigUint::from(threshold) - BigUint::from(1u64);
+            // Modulus = prime
+            let modulus = match prime {
                 None => default_prime(),
                 Some(x) => x.into(),
             };
+            // Coefficients = [0; degree]
+            let coefficients: Vec<BigInt>;
+            // random generate coefficients
+            // Coefficients.iter_mut { c = BigUint.random }
+            // GenShare = function (x) {
+            //      ret = FreeTerm
+            //      for (i, value) in Coefficients.iter_mut() {
+            //          ret += value.mul(x.pow(i+1))
+            //      }
+            //      return ret
+            // }
+            // shareValues = [[0,2], shares]
+            // for i, value in shareValues.iter_mut() { value[0] = i+1, value[1] = GenShare(i+1s) }
+            // for each shareValues , print result as hex string
 
             if args.verbose {
-                println!("Input: {} {} {} {:?}", secret, shares, threshold, p)
+                println!("Input: {} {} {} {:?}", secret, shares, threshold, modulus)
             }
 
-            println!("╭─────────────────────────────────────╮");
-            println!("│ Shamir's Secret Sharing             │");
-            println!("├─────────────────────────────────────┤");
-            println!("│ Prime:     2²⁵⁵-19 (Curve25519)     │");
-            println!("│ Threshold: 3 of 5                   │");
-            println!("│ Secret (dec): 1234                  │");
-            println!("│ Secret (hex): 0x4d2                 │");
-            println!("╰─────────────────────────────────────╯");
+            println!(" Shamir's Secret Sharing        ");
+            println!(" ───────────────────────────────");
+            println!(" Prime (dec): {}", modulus);
+            println!(" Prime (hex): {:#x}", modulus);
+            println!(" Threshold: {} of {}", threshold, shares);
+            println!(" Secret (dec): {}", secret);
+            println!(" Secret (hex): {:#x}", secret);
             println!();
-            println!("Shares:");
-            println!("  1: 8a3f...2c4d (hex, 64 chars)");
-            println!("  2: 1b7e...9f3a");
-            println!("  3: c42d...8e1b");
-            println!("  4: 7f9a...3c2e");
-            println!("  5: 2e8b...4d7f");
+            println!(" Shares:");
+            println!("   1: 8a3f...2c4d (hex, 64 chars)");
+            println!("   2: 1b7e...9f3a");
+            println!("   3: c42d...8e1b");
+            println!("   4: 7f9a...3c2e");
+            println!("   5: 2e8b...4d7f");
             println!();
             println!("⚠️  Store shares separately. Any 3 can reconstruct the secret.");
         }
