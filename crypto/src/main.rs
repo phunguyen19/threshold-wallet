@@ -1,3 +1,5 @@
+use std::ops::Rem;
+
 use clap::{Parser, Subcommand};
 use num_bigint::{BigInt, BigUint, RandBigInt};
 
@@ -39,6 +41,10 @@ enum Commands {
         /// Optional prime value
         #[arg(long)]
         prime: Option<u64>,
+
+        /// Optional coefficients
+        #[arg(long)]
+        coefficients: Option<Vec<u64>>,
     },
     Reconstruct {
         // List of shares for reconstruct the secret
@@ -56,6 +62,7 @@ fn main() {
             shares,
             threshold,
             prime,
+            coefficients: arg_coefficients,
         } => {
             // Build the polynomial P(x)
 
@@ -72,55 +79,77 @@ fn main() {
             };
 
             // random generate coefficients
-            let mut coefficients: Vec<BigInt> = Vec::new();
-            let mut rng = rand::thread_rng();
-            let low: BigInt = 0.into();
+            let mut coefficient_vals: Vec<BigUint> = Vec::new();
 
-            while coefficients.len() < (threshold - 1) as usize {
-                let a = rng.gen_bigint_range(&low, &modulus.clone().into());
-                coefficients.push(a);
+            match arg_coefficients {
+                Some(arg_vals) => {
+                    for value in arg_vals {
+                        coefficient_vals.push(value.into());
+                    }
+                }
+                None => {
+                    let mut rng = rand::thread_rng();
+
+                    while coefficient_vals.len() < (threshold - 1) as usize {
+                        let a = rng.gen_biguint_range(&BigUint::ZERO, &modulus.clone().into());
+                        coefficient_vals.push(a);
+                    }
+                }
             }
 
-            // The polynomial function
-            let polynomial_func = |x: u64| -> BigInt {
-                let mut ret = free_term.clone();
-                for (index, value) in coefficients.iter().enumerate() {
-                    ret += value * (x.pow(( index as u32 ) + 1))
+            // Calculate the possitive free term modulus
+            let free_term_modulused = if free_term > BigInt::from(0) {
+                match free_term.to_biguint() {
+                    Some(v) => v % &modulus,
+                    None => BigUint::from(0_u32),
                 }
-                ret.into()
+            } else {
+                let t: BigInt = free_term * BigInt::from(-1_i32);
+                match t.to_biguint() {
+                    Some(v) => &modulus - v % &modulus,
+                    None => BigUint::from(0_u32),
+                }
+            };
+
+            // The polynomial function
+            let polynomial_func = |x: u64| -> BigUint {
+                let mut ret: BigUint = 0_u64.into();
+                for (index, value) in coefficient_vals.iter().enumerate() {
+                    ret += value * (x.pow((index as u32) + 1));
+                    ret = ret % &modulus;
+                }
+                (ret + &free_term_modulused) % &modulus 
             };
 
             // Calculate shares
-            let mut share_vals: Vec<BigInt> = Vec::new();
-            share_vals.push(free_term.clone());
+            let mut share_vals: Vec<BigUint> = Vec::new();
             while share_vals.len() < shares as usize {
                 let index = share_vals.len();
-                let val = polynomial_func(index as u64);
+                let val = polynomial_func((index + 1) as u64);
                 share_vals.push(val);
             }
 
             if args.verbose {
                 println!("Input: {} {} {} {:?}", secret, shares, threshold, modulus);
-                println!("coefficients: {:?}", coefficients);
+                println!("coefficients: {:?}", coefficient_vals);
                 println!("share_vals: {:?}", share_vals);
             }
 
-            println!(" Shamir's Secret Sharing        ");
-            println!(" ───────────────────────────────");
-            println!(" Prime (dec): {}", modulus);
-            println!(" Prime (hex): {:#x}", modulus);
-            println!(" Threshold: {} of {}", threshold, shares);
-            println!(" Secret (dec): {}", secret);
-            println!(" Secret (hex): {:#x}", secret);
             println!();
-            println!(" Shares:");
-            println!("   1: 8a3f...2c4d (hex, 64 chars)");
-            println!("   2: 1b7e...9f3a");
-            println!("   3: c42d...8e1b");
-            println!("   4: 7f9a...3c2e");
-            println!("   5: 2e8b...4d7f");
+            println!("Shamir's Secret Sharing        ");
+            println!("───────────────────────────────");
+            println!("Prime (dec): {}", modulus);
+            println!("Prime (hex): {:#x}", modulus);
+            println!("Threshold: {} of {}", threshold, shares);
+            println!("Secret (dec): {}", secret);
+            println!("Secret (hex): {:#x}", secret);
             println!();
-            println!("⚠️  Store shares separately. Any 3 can reconstruct the secret.");
+            println!("Shares:");
+            for ( i, val ) in share_vals.iter().enumerate() {
+                println!("  {}: {:#x}", i + 1, val)
+            }
+            println!();
+            println!("⚠️  Store shares separately. Any {} can reconstruct the secret.", threshold);
         }
         Commands::Reconstruct { shares } => {
             if args.verbose {
