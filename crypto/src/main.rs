@@ -118,7 +118,7 @@ fn main() {
                     ret += value * (x.pow((index as u32) + 1));
                     ret = ret % &modulus;
                 }
-                (ret + &free_term_modulused) % &modulus 
+                (ret + &free_term_modulused) % &modulus
             };
 
             // Calculate shares
@@ -145,11 +145,14 @@ fn main() {
             println!("Secret (hex): {:#x}", secret);
             println!();
             println!("Shares:");
-            for ( i, val ) in share_vals.iter().enumerate() {
+            for (i, val) in share_vals.iter().enumerate() {
                 println!("  {}: {:#x}", i + 1, val)
             }
             println!();
-            println!("⚠️  Store shares separately. Any {} can reconstruct the secret.", threshold);
+            println!(
+                "⚠️  Store shares separately. Any {} can reconstruct the secret.",
+                threshold
+            );
         }
         Commands::Reconstruct { shares } => {
             if args.verbose {
