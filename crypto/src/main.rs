@@ -1,5 +1,3 @@
-use std::ops::Rem;
-
 use clap::{Parser, Subcommand};
 use num_bigint::{BigInt, BigUint, RandBigInt};
 
@@ -48,8 +46,12 @@ enum Commands {
     },
     Reconstruct {
         // List of shares for reconstruct the secret
-        #[arg(long)]
+        #[arg(long, short)]
         shares: Vec<String>,
+
+        /// Optional prime value
+        #[arg(long, short)]
+        prime: Option<u64>,
     },
 }
 
@@ -146,7 +148,9 @@ fn main() {
             println!();
             println!("Shares:");
             for (i, val) in share_vals.iter().enumerate() {
-                println!("  {}: {:#x}", i + 1, val)
+                println!("  {}: {}", i + 1, val);
+                println!("     {:#x}", val);
+                println!();
             }
             println!();
             println!(
@@ -154,9 +158,28 @@ fn main() {
                 threshold
             );
         }
-        Commands::Reconstruct { shares } => {
+        Commands::Reconstruct { shares, prime } => {
+            // Validate shares format is correct x,y
+            let mut share_points: Vec<(&str, &str)> = Vec::new();
+            for val in &shares {
+                let s: Vec<&str> = val.split(",").collect();
+                if s.len() != 2 {
+                    eprint!("cannot part share param: {:?}", val);
+                    std::process::exit(1);
+                }
+                // TODO: parse share value to be number
+                share_points.push((s[0], s[1]));
+            }
+
+            // Prime check and default set
+            // For each key point:
+            // Calculate: Li(0) mod p
+            // Verify: Sum(Li) = 1 mod p
+            // Compute q(0) = D mod p
+
             if args.verbose {
-                println!("Input: {:?}", shares)
+                println!("share_points: {:?}", share_points);
+                println!("Input: {:?} {:?}", shares, prime);
             }
 
             println!("╭─────────────────────────────────────╮");
