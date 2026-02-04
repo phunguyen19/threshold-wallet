@@ -160,16 +160,7 @@ fn main() {
         }
         Commands::Reconstruct { shares, prime } => {
             // Validate shares format is correct x,y
-            let mut share_points: Vec<(&str, &str)> = Vec::new();
-            for val in &shares {
-                let s: Vec<&str> = val.split(",").collect();
-                if s.len() != 2 {
-                    eprint!("cannot part share param: {:?}", val);
-                    std::process::exit(1);
-                }
-                // TODO: parse share value to be number
-                share_points.push((s[0], s[1]));
-            }
+            let share_points = parseShares(&shares);
 
             // Prime check and default set
             // For each key point:
@@ -202,4 +193,41 @@ fn main() {
             println!("╰─────────────────────────────────────╯");
         }
     }
+}
+
+fn parseShares(shares: &Vec<String>) -> Vec<(u64, u64)> {
+    let mut share_points: Vec<(u64, u64)> = Vec::new();
+    for val in shares {
+        let s: Vec<&str> = val.split(",").collect();
+        if s.len() != 2 {
+            eprint!("cannot parse share param: {:?}", val);
+            std::process::exit(1);
+        }
+
+        let x: u64 = match s[0].parse() {
+            Ok(n) => n,
+            Err(e) => {
+                eprint!(
+                    "cannot parse x={} of share={:?} . Error: {:?}",
+                    s[0], val, e
+                );
+                std::process::exit(1);
+            }
+        };
+
+        let y: u64 = match s[1].parse() {
+            Ok(n) => n,
+            Err(e) => {
+                eprint!(
+                    "cannot parse y={} of share={:?} . Error: {:?}",
+                    s[1], val, e
+                );
+                std::process::exit(1);
+            }
+        };
+
+        share_points.push((x, y));
+    }
+
+    return share_points;
 }
