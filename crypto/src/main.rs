@@ -1,3 +1,5 @@
+use std::ops::Mul;
+
 use clap::{Parser, Subcommand};
 use num_bigint::{BigInt, BigUint, RandBigInt};
 
@@ -163,8 +165,27 @@ fn main() {
             let share_points = parse_shares(&shares);
 
             // Prime check and default set
+            let modulus = match prime {
+                None => default_prime(),
+                Some(x) => x.into(),
+            };
+
             // For each key point:
             // Calculate: Li(0) mod p
+            // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
+            for val in &share_points {
+                let mut numerator: BigUint = 1_usize.into();
+                let mut denominator: BigUint = 1_usize.into();
+                for val2 in &share_points {
+                    if val2.0 == val.0 {
+                        continue;
+                    }
+                    numerator *= 0_usize - &val2.0;
+                    denominator *= &val.0 - &val2.0;
+                }
+                let demoninator_ne1 = denominator.modinv(&modulus);
+            }
+
             // Verify: Sum(Li) = 1 mod p
             // Compute q(0) = D mod p
 
@@ -195,8 +216,8 @@ fn main() {
     }
 }
 
-fn parse_shares(shares: &Vec<String>) -> Vec<(u64, u64)> {
-    let mut share_points: Vec<(u64, u64)> = Vec::new();
+fn parse_shares(shares: &Vec<String>) -> Vec<(BigUint, BigUint)> {
+    let mut share_points: Vec<(BigUint, BigUint)> = Vec::new();
     for val in shares {
         let s: Vec<&str> = val.split(",").collect();
         if s.len() != 2 {
@@ -220,7 +241,7 @@ fn parse_shares(shares: &Vec<String>) -> Vec<(u64, u64)> {
             std::process::exit(1);
         });
 
-        share_points.push((x, y));
+        share_points.push((x.into(), y.into()));
     }
 
     return share_points;
