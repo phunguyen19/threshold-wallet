@@ -1,15 +1,16 @@
-use std::ops::Mul;
-
 use clap::{Parser, Subcommand};
-use num_bigint::{BigInt, BigUint, RandBigInt};
+use num_bigint::{BigInt, BigUint, RandBigInt, Sign};
 
 /// Curve25519 prime: 2^255 - 19 (little-endian bytes)
-pub fn default_prime() -> BigUint {
-    BigUint::from_bytes_le(&[
-        0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        0xff, 0x7f,
-    ])
+pub fn default_prime() -> BigInt {
+    BigInt::from_bytes_le(
+        Sign::Plus,
+        &[
+            0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0x7f,
+        ],
+    )
 }
 
 #[derive(Parser, Debug)]
@@ -32,19 +33,19 @@ enum Commands {
 
         /// How many shares
         #[arg(long)]
-        shares: u64,
+        shares: i64,
 
         /// Minimal number of shares need to gather to reconstruct the secret
         #[arg(long)]
-        threshold: u64,
+        threshold: i64,
 
         /// Optional prime value
         #[arg(long)]
-        prime: Option<u64>,
+        prime: Option<i64>,
 
         /// Optional coefficients
         #[arg(long)]
-        coefficients: Option<Vec<u64>>,
+        coefficients: Option<Vec<i64>>,
     },
     Reconstruct {
         // List of shares for reconstruct the secret
@@ -53,7 +54,7 @@ enum Commands {
 
         /// Optional prime value
         #[arg(long, short)]
-        prime: Option<u64>,
+        prime: Option<i64>,
     },
 }
 
@@ -73,9 +74,6 @@ fn main() {
             // Free term
             let free_term: BigInt = secret.into();
 
-            // Degree = threshold - 1
-            let degree = BigUint::from(threshold) - BigUint::from(1usize);
-
             // Modulus = prime
             let modulus = match prime {
                 None => default_prime(),
@@ -83,7 +81,7 @@ fn main() {
             };
 
             // random generate coefficients
-            let mut coefficient_vals: Vec<BigUint> = Vec::new();
+            let mut coefficient_vals: Vec<BigInt> = Vec::new();
 
             match arg_coefficients {
                 Some(arg_vals) => {
@@ -95,41 +93,26 @@ fn main() {
                     let mut rng = rand::thread_rng();
 
                     while coefficient_vals.len() < (threshold - 1) as usize {
-                        let a = rng.gen_biguint_range(&BigUint::ZERO, &modulus.clone().into());
+                        let a = rng.gen_bigint_range(&BigInt::ZERO, &modulus.clone().into());
                         coefficient_vals.push(a);
                     }
                 }
             }
 
-            // Calculate the possitive free term modulus
-            let free_term_modulused = if free_term > BigInt::from(0) {
-                match free_term.to_biguint() {
-                    Some(v) => v % &modulus,
-                    None => BigUint::from(0_u32),
-                }
-            } else {
-                let t: BigInt = free_term * BigInt::from(-1_i32);
-                match t.to_biguint() {
-                    Some(v) => &modulus - v % &modulus,
-                    None => BigUint::from(0_u32),
-                }
-            };
-
             // The polynomial function
-            let polynomial_func = |x: u64| -> BigUint {
-                let mut ret: BigUint = 0_u64.into();
+            let polynomial_func = |x: i64| -> BigInt {
+                let mut ret: BigInt = 0_u64.into();
                 for (index, value) in coefficient_vals.iter().enumerate() {
                     ret += value * (x.pow((index as u32) + 1));
-                    ret = ret % &modulus;
                 }
-                (ret + &free_term_modulused) % &modulus
+                proper_rem(ret + &free_term, modulus.clone())
             };
 
             // Calculate shares
-            let mut share_vals: Vec<BigUint> = Vec::new();
+            let mut share_vals: Vec<BigInt> = Vec::new();
             while share_vals.len() < shares as usize {
                 let index = share_vals.len();
-                let val = polynomial_func((index + 1) as u64);
+                let val = polynomial_func((index + 1) as i64);
                 share_vals.push(val);
             }
 
@@ -152,7 +135,6 @@ fn main() {
             for (i, val) in share_vals.iter().enumerate() {
                 println!("  {}: {}", i + 1, val);
                 println!("     {:#x}", val);
-                println!();
             }
             println!();
             println!(
@@ -173,25 +155,38 @@ fn main() {
             // For each key point:
             // Calculate: Li(0) mod p
             // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
+            let mut l_vec: Vec<BigInt> = Vec::new();
             for val in &share_points {
-                let mut numerator: BigUint = 1_usize.into();
-                let mut denominator: BigUint = 1_usize.into();
+                let mut numerator: BigInt = 1_usize.into();
+                let mut denominator: BigInt = 1_usize.into();
                 for val2 in &share_points {
                     if val2.0 == val.0 {
                         continue;
                     }
-                    numerator *= 0_usize - &val2.0;
+                    numerator *= -&val2.0;
                     denominator *= &val.0 - &val2.0;
                 }
-                let demoninator_ne1 = denominator.modinv(&modulus);
+
+                if denominator < 0.into() {
+                    numerator = -numerator;
+                    denominator = -denominator;
+                }
+
+                let demoninator_inv_mod = denominator.modinv(&modulus).unwrap_or_else(|| {
+                    println!("cannot calculate inverse mod for share={:?}", val);
+                    std::process::exit(1);
+                });
+
+                l_vec.push(proper_rem(numerator * demoninator_inv_mod, modulus.clone()));
             }
 
             // Verify: Sum(Li) = 1 mod p
             // Compute q(0) = D mod p
 
             if args.verbose {
-                println!("share_points: {:?}", share_points);
                 println!("Input: {:?} {:?}", shares, prime);
+                println!("share_points: {:?}", share_points);
+                println!("l_vec: {:?}", l_vec);
             }
 
             println!("╭─────────────────────────────────────╮");
@@ -216,8 +211,8 @@ fn main() {
     }
 }
 
-fn parse_shares(shares: &Vec<String>) -> Vec<(BigUint, BigUint)> {
-    let mut share_points: Vec<(BigUint, BigUint)> = Vec::new();
+fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
+    let mut share_points: Vec<(BigInt, BigInt)> = Vec::new();
     for val in shares {
         let s: Vec<&str> = val.split(",").collect();
         if s.len() != 2 {
@@ -245,4 +240,12 @@ fn parse_shares(shares: &Vec<String>) -> Vec<(BigUint, BigUint)> {
     }
 
     return share_points;
+}
+
+fn proper_rem(a: BigInt, b: BigInt) -> BigInt {
+    if a < 0.into() {
+        &b - ((-a) % &b)
+    } else {
+        a % &b
+    }
 }
