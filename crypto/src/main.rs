@@ -1,7 +1,5 @@
-use std::fmt::Display;
-
 use clap::{Parser, Subcommand, ValueEnum};
-use num_bigint::{BigInt, BigUint, RandBigInt, Sign};
+use num_bigint::{BigInt, RandBigInt, Sign};
 
 /// Curve25519 prime: 2^255 - 19 (little-endian bytes)
 pub fn default_prime() -> BigInt {
@@ -139,12 +137,14 @@ fn main() {
             println!("Prime: {}", num_format(&modulus));
             println!("Threshold: {} of {}", threshold, shares);
             println!("Secret: {}", num_format(&secret.into()));
+            println!("───────────────────────────────");
             println!();
             println!("Shares:");
             for (i, val) in share_vals.iter().enumerate() {
                 println!("  {}: {}", i + 1, num_format(val));
             }
             println!();
+            println!("───────────────────────────────");
             println!(
                 "⚠️  Store shares separately. Any {} can reconstruct the secret.",
                 threshold
@@ -209,7 +209,6 @@ fn main() {
                 println!("Input: {:?} {:?}", shares, prime);
                 println!("share_points: {:?}", share_points);
                 println!("l_vec: {:?}", l_vec);
-                println!("sec: {:?}", sec);
             }
 
             println!();
