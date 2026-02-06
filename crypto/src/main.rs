@@ -1,4 +1,6 @@
-use clap::{Parser, Subcommand};
+use std::fmt::Display;
+
+use clap::{Parser, Subcommand, ValueEnum};
 use num_bigint::{BigInt, BigUint, RandBigInt, Sign};
 
 /// Curve25519 prime: 2^255 - 19 (little-endian bytes)
@@ -19,8 +21,18 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
+    #[arg(long, global = true, value_enum, default_value_t = NumMod::Hex)]
+    num_mod: NumMod,
+
     #[arg(long, global = true)]
     verbose: bool,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+#[clap(rename_all = "lower")]
+enum NumMod {
+    Hex,
+    Dec,
 }
 
 #[derive(Subcommand, Debug)]
@@ -60,6 +72,7 @@ enum Commands {
 
 fn main() {
     let args = Cli::parse();
+    let num_format = new_num_format(&args.num_mod);
 
     match args.command {
         Commands::Generate {
@@ -105,7 +118,7 @@ fn main() {
                 for (index, value) in coefficient_vals.iter().enumerate() {
                     ret += value * (x.pow((index as u32) + 1));
                 }
-                proper_rem(ret + &free_term, modulus.clone())
+                posrem(ret + &free_term, modulus.clone())
             };
 
             // Calculate shares
@@ -117,24 +130,19 @@ fn main() {
             }
 
             if args.verbose {
-                println!("Input: {} {} {} {:?}", secret, shares, threshold, modulus);
                 println!("coefficients: {:?}", coefficient_vals);
-                println!("share_vals: {:?}", share_vals);
             }
 
             println!();
             println!("Shamir's Secret Sharing        ");
             println!("───────────────────────────────");
-            println!("Prime (dec): {}", modulus);
-            println!("Prime (hex): {:#x}", modulus);
+            println!("Prime: {}", num_format(&modulus));
             println!("Threshold: {} of {}", threshold, shares);
-            println!("Secret (dec): {}", secret);
-            println!("Secret (hex): {:#x}", secret);
+            println!("Secret: {}", num_format(&secret.into()));
             println!();
             println!("Shares:");
             for (i, val) in share_vals.iter().enumerate() {
-                println!("  {}: {}", i + 1, val);
-                println!("     {:#x}", val);
+                println!("  {}: {}", i + 1, num_format(val));
             }
             println!();
             println!(
@@ -155,7 +163,15 @@ fn main() {
             // For each key point:
             // Calculate: Li(0) mod p
             // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
-            let mut l_vec: Vec<BigInt> = Vec::new();
+            let mut l_vec: Vec<(BigInt, BigInt, BigInt)> = Vec::new();
+
+            // L1 + L2 + L3 = 1 mod p
+            let mut verify: BigInt = 0.into();
+
+            // Compute q(0) = D mod p
+            // q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x)
+            let mut sec: BigInt = 0.into();
+
             for val in &share_points {
                 let mut numerator: BigInt = 1_usize.into();
                 let mut denominator: BigInt = 1_usize.into();
@@ -177,36 +193,41 @@ fn main() {
                     std::process::exit(1);
                 });
 
-                l_vec.push(proper_rem(numerator * demoninator_inv_mod, modulus.clone()));
+                let l = posrem(numerator * demoninator_inv_mod, modulus.clone());
+                verify += &l;
+                sec = (sec + (&val.1 * &l)) % &modulus;
+                l_vec.push((val.0.clone(), val.1.clone(), l));
             }
 
             // Verify: Sum(Li) = 1 mod p
-            // Compute q(0) = D mod p
+            if verify % &modulus != 1.into() {
+                println!("shares are not in the same polynomial");
+                std::process::exit(1);
+            }
 
             if args.verbose {
                 println!("Input: {:?} {:?}", shares, prime);
                 println!("share_points: {:?}", share_points);
                 println!("l_vec: {:?}", l_vec);
+                println!("sec: {:?}", sec);
             }
 
-            println!("╭─────────────────────────────────────╮");
-            println!("│ Shamir's Secret Reconstruction      │");
-            println!("├─────────────────────────────────────┤");
-            println!("│ Prime:     2²⁵⁵-19 (Curve25519)     │");
-            println!("│ Shares:    3 provided               │");
-            println!("╰─────────────────────────────────────╯");
+            println!();
+            println!("Shamir's Secret Reconstruction ");
+            println!("───────────────────────────────");
+            println!("Prime: {}", num_format(&modulus));
+            println!("Shares: {} provided", shares.len());
+            println!("───────────────────────────────");
             println!();
             println!("Input Shares:");
-            println!("  1: 8a3f...2c4d (hex, 64 chars)");
-            println!("  3: c42d...8e1b");
-            println!("  5: 2e8b...4d7f");
+            for s in &share_points {
+                println!("  {}: {}", &s.0, num_format(&s.1));
+            }
             println!();
-            println!("╭─────────────────────────────────────╮");
-            println!("│ ✓ Reconstructed Secret              │");
-            println!("├─────────────────────────────────────┤");
-            println!("│ Decimal: 1234                       │");
-            println!("│ Hex:     0x4d2                      │");
-            println!("╰─────────────────────────────────────╯");
+            println!("✓ Reconstructed Secret");
+            println!("──────────────────────");
+            println!("Secret: {}", num_format(&sec));
+            println!("──────────────────────");
         }
     }
 }
@@ -242,10 +263,17 @@ fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
     return share_points;
 }
 
-fn proper_rem(a: BigInt, b: BigInt) -> BigInt {
+fn posrem(a: BigInt, b: BigInt) -> BigInt {
     if a < 0.into() {
         &b - ((-a) % &b)
     } else {
         a % &b
+    }
+}
+
+fn new_num_format(m: &NumMod) -> Box<dyn Fn(&BigInt) -> String> {
+    match m {
+        NumMod::Hex => Box::new(move |n: &BigInt| format!("{:#x}", n)),
+        NumMod::Dec => Box::new(move |n: &BigInt| format!("{}", n)),
     }
 }
