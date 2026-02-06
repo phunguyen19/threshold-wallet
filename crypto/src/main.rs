@@ -52,8 +52,8 @@ enum Commands {
         threshold: usize,
 
         /// Optional prime value
-        #[arg(long)]
-        prime: Option<i64>,
+        #[arg(long, value_parser = clap::value_parser!(BigInt))]
+        prime: Option<BigInt>,
 
         /// Optional coefficients
         #[arg(long)]
@@ -86,7 +86,7 @@ fn main() {
                 &secret,
                 shares,
                 threshold,
-                prime.map(|x| -> BigInt { x.into() }),
+                prime,
                 arg_coefficients.map(|v| -> Vec<BigInt> {
                     v.into_iter().map(|x| -> BigInt { x.into() }).collect()
                 }),
