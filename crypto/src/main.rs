@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use num_bigint::{BigInt, RandBigInt, Sign};
 
@@ -39,7 +41,7 @@ enum Commands {
     Generate {
         /// The secret need to be generated shares
         #[arg(long)]
-        secret: i64,
+        secret: String,
 
         /// How many shares
         #[arg(long)]
@@ -82,8 +84,10 @@ fn main() {
         } => {
             // Build the polynomial P(x)
 
-            // Free term
-            let free_term: BigInt = secret.into();
+            let secret_bigint = BigInt::from_str(secret.as_str()).unwrap_or_else(|e| {
+                println!("cannot parse number secret {}. Error: {:?}", secret, e);
+                std::process::exit(1);
+            });
 
             // Modulus = prime
             let modulus = match prime {
@@ -116,7 +120,7 @@ fn main() {
                 for (index, value) in coefficient_vals.iter().enumerate() {
                     ret += value * (x.pow((index as u32) + 1));
                 }
-                posrem(ret + &free_term, modulus.clone())
+                posrem(ret + &secret_bigint, modulus.clone())
             };
 
             // Calculate shares
@@ -136,7 +140,7 @@ fn main() {
             println!("───────────────────────────────");
             println!("Prime: {}", num_format(&modulus));
             println!("Threshold: {} of {}", threshold, shares);
-            println!("Secret: {}", num_format(&secret.into()));
+            println!("Secret: {}", num_format(&secret_bigint));
             println!("───────────────────────────────");
             println!();
             println!("Shares:");
@@ -240,7 +244,7 @@ fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
             std::process::exit(1);
         }
 
-        let x: u64 = s[0].parse().unwrap_or_else(|e| {
+        let x: BigInt = BigInt::from_str(s[0]).unwrap_or_else(|e| {
             eprint!(
                 "cannot parse x={} of share={:?} . Error: {:?}",
                 s[0], val, e
@@ -248,7 +252,7 @@ fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
             std::process::exit(1);
         });
 
-        let y: u64 = s[1].parse().unwrap_or_else(|e| {
+        let y: BigInt = BigInt::from_str(s[1]).unwrap_or_else(|e| {
             eprint!(
                 "cannot parse y={} of share={:?} . Error: {:?}",
                 s[1], val, e
@@ -256,7 +260,7 @@ fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
             std::process::exit(1);
         });
 
-        share_points.push((x.into(), y.into()));
+        share_points.push((x, y));
     }
 
     return share_points;
