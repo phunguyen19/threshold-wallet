@@ -40,16 +40,16 @@ enum Commands {
     /// Generate shares for a secret
     Generate {
         /// The secret need to be generated shares
-        #[arg(long)]
-        secret: String,
+        #[arg(long, value_parser = BigInt::from_str)]
+        secret: BigInt,
 
         /// How many shares
         #[arg(long)]
-        shares: i64,
+        shares: usize,
 
         /// Minimal number of shares need to gather to reconstruct the secret
         #[arg(long)]
-        threshold: i64,
+        threshold: usize,
 
         /// Optional prime value
         #[arg(long)]
@@ -82,57 +82,18 @@ fn main() {
             prime,
             coefficients: arg_coefficients,
         } => {
-            // Build the polynomial P(x)
-
-            let secret_bigint = BigInt::from_str(secret.as_str()).unwrap_or_else(|e| {
-                println!("cannot parse number secret {}. Error: {:?}", secret, e);
-                std::process::exit(1);
-            });
-
-            // Modulus = prime
-            let modulus = match prime {
-                None => default_prime(),
-                Some(x) => x.into(),
-            };
-
-            // random generate coefficients
-            let mut coefficient_vals: Vec<BigInt> = Vec::new();
-
-            match arg_coefficients {
-                Some(arg_vals) => {
-                    for value in arg_vals {
-                        coefficient_vals.push(value.into());
-                    }
-                }
-                None => {
-                    let mut rng = rand::thread_rng();
-
-                    while coefficient_vals.len() < (threshold - 1) as usize {
-                        let a = rng.gen_bigint_range(&BigInt::ZERO, &modulus.clone().into());
-                        coefficient_vals.push(a);
-                    }
-                }
-            }
-
-            // The polynomial function
-            let polynomial_func = |x: i64| -> BigInt {
-                let mut ret: BigInt = 0_u64.into();
-                for (index, value) in coefficient_vals.iter().enumerate() {
-                    ret += value * (x.pow((index as u32) + 1));
-                }
-                posrem(ret + &secret_bigint, modulus.clone())
-            };
-
-            // Calculate shares
-            let mut share_vals: Vec<BigInt> = Vec::new();
-            while share_vals.len() < shares as usize {
-                let index = share_vals.len();
-                let val = polynomial_func((index + 1) as i64);
-                share_vals.push(val);
-            }
+            let (share_vals, coefficients, modulus) = generate_share(
+                &secret,
+                shares,
+                threshold,
+                prime.map(|x| -> BigInt { x.into() }),
+                arg_coefficients.map(|v| -> Vec<BigInt> {
+                    v.into_iter().map(|x| -> BigInt { x.into() }).collect()
+                }),
+            );
 
             if args.verbose {
-                println!("coefficients: {:?}", coefficient_vals);
+                println!("coefficients: {:?}", coefficients);
             }
 
             println!();
@@ -140,7 +101,7 @@ fn main() {
             println!("───────────────────────────────");
             println!("Prime: {}", num_format(&modulus));
             println!("Threshold: {} of {}", threshold, shares);
-            println!("Secret: {}", num_format(&secret_bigint));
+            println!("Secret: {}", num_format(&secret));
             println!("───────────────────────────────");
             println!();
             println!("Shares:");
@@ -233,6 +194,58 @@ fn main() {
             println!("──────────────────────");
         }
     }
+}
+
+fn generate_share(
+    secret: &BigInt,
+    shares: usize,
+    threshold: usize,
+    prime: Option<BigInt>,
+    coefficients: Option<Vec<BigInt>>,
+) -> (Vec<BigInt>, Vec<BigInt>, BigInt) {
+    // Modulus = prime
+    let modulus = match prime {
+        None => default_prime(),
+        Some(x) => x.into(),
+    };
+
+    // random generate coefficients
+    let mut coefficient_vals: Vec<BigInt> = Vec::new();
+
+    match coefficients {
+        Some(arg_vals) => {
+            for value in arg_vals {
+                coefficient_vals.push(value);
+            }
+        }
+        None => {
+            let mut rng = rand::thread_rng();
+
+            while coefficient_vals.len() < (threshold - 1) {
+                let a = rng.gen_bigint_range(&BigInt::ZERO, &modulus.clone().into());
+                coefficient_vals.push(a);
+            }
+        }
+    }
+
+    // The polynomial function
+    let polynomial_func = |x: i64| -> BigInt {
+        let mut ret: BigInt = 0_u64.into();
+        for (index, value) in coefficient_vals.iter().enumerate() {
+            ret += value * (x.pow((index as u32) + 1));
+        }
+        posrem(ret + secret, modulus.clone())
+    };
+
+    // Calculate shares
+    let mut share_vals: Vec<BigInt> = Vec::new();
+    while share_vals.len() < shares {
+        let index = share_vals.len();
+        let val = polynomial_func((index + 1) as i64);
+        share_vals.push(val);
+    }
+
+    return (share_vals, coefficient_vals, modulus);
 }
 
 fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
