@@ -65,8 +65,8 @@ enum Commands {
         shares: Vec<String>,
 
         /// Optional prime value
-        #[arg(long, short)]
-        prime: Option<i64>,
+        #[arg(long, short, value_parser = clap::value_parser!(BigInt))]
+        prime: Option<BigInt>,
     },
 }
 
@@ -119,56 +119,7 @@ fn main() {
             // Validate shares format is correct x,y
             let share_points = parse_shares(&shares);
 
-            // Prime check and default set
-            let modulus = match prime {
-                None => default_prime(),
-                Some(x) => x.into(),
-            };
-
-            // For each key point:
-            // Calculate: Li(0) mod p
-            // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
-            let mut l_vec: Vec<(BigInt, BigInt, BigInt)> = Vec::new();
-
-            // L1 + L2 + L3 = 1 mod p
-            let mut verify: BigInt = 0.into();
-
-            // Compute q(0) = D mod p
-            // q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x)
-            let mut sec: BigInt = 0.into();
-
-            for val in &share_points {
-                let mut numerator: BigInt = 1_usize.into();
-                let mut denominator: BigInt = 1_usize.into();
-                for val2 in &share_points {
-                    if val2.0 == val.0 {
-                        continue;
-                    }
-                    numerator *= -&val2.0;
-                    denominator *= &val.0 - &val2.0;
-                }
-
-                if denominator < 0.into() {
-                    numerator = -numerator;
-                    denominator = -denominator;
-                }
-
-                let demoninator_inv_mod = denominator.modinv(&modulus).unwrap_or_else(|| {
-                    println!("cannot calculate inverse mod for share={:?}", val);
-                    std::process::exit(1);
-                });
-
-                let l = posrem(numerator * demoninator_inv_mod, modulus.clone());
-                verify += &l;
-                sec = (sec + (&val.1 * &l)) % &modulus;
-                l_vec.push((val.0.clone(), val.1.clone(), l));
-            }
-
-            // Verify: Sum(Li) = 1 mod p
-            if verify % &modulus != 1.into() {
-                println!("shares are not in the same polynomial");
-                std::process::exit(1);
-            }
+            let (modulus, l_vec, sec) = reconstruct(share_points.clone(), prime.clone());
 
             if args.verbose {
                 println!("Input: {:?} {:?}", shares, prime);
@@ -246,6 +197,60 @@ fn generate_share(
     }
 
     return (share_vals, coefficient_vals, modulus);
+}
+
+fn reconstruct(
+    share_points: Vec<(BigInt, BigInt)>,
+    prime: Option<BigInt>,
+) -> (BigInt, Vec<(BigInt, BigInt, BigInt)>, BigInt) {
+    let modulus = prime.unwrap_or(default_prime());
+
+    // For each key point:
+    // Calculate: Li(0) mod p
+    // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
+    let mut l_vec: Vec<(BigInt, BigInt, BigInt)> = Vec::new();
+
+    // L1 + L2 + L3 = 1 mod p
+    let mut verify: BigInt = 0.into();
+
+    // Compute q(0) = D mod p
+    // q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x)
+    let mut sec: BigInt = 0.into();
+
+    for val in &share_points {
+        let mut numerator: BigInt = 1_usize.into();
+        let mut denominator: BigInt = 1_usize.into();
+        for val2 in &share_points {
+            if val2.0 == val.0 {
+                continue;
+            }
+            numerator *= -&val2.0;
+            denominator *= &val.0 - &val2.0;
+        }
+
+        if denominator < 0.into() {
+            numerator = -numerator;
+            denominator = -denominator;
+        }
+
+        let demoninator_inv_mod = denominator.modinv(&modulus).unwrap_or_else(|| {
+            println!("cannot calculate inverse mod for share={:?}", val);
+            std::process::exit(1);
+        });
+
+        let l = posrem(numerator * demoninator_inv_mod, modulus.clone());
+        verify += &l;
+        sec = (sec + (&val.1 * &l)) % &modulus;
+        l_vec.push((val.0.clone(), val.1.clone(), l));
+    }
+
+    // Verify: Sum(Li) = 1 mod p
+    if verify % &modulus != 1.into() {
+        println!("shares are not in the same polynomial");
+        std::process::exit(1);
+    }
+
+    return (modulus, l_vec, sec);
 }
 
 fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
