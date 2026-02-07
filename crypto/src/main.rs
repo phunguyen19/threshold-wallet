@@ -56,13 +56,13 @@ enum Commands {
         prime: Option<BigInt>,
 
         /// Optional coefficients
-        #[arg(long)]
-        coefficients: Option<Vec<i64>>,
+        #[arg(long, value_delimiter = ',', value_parser = BigInt::from_str)]
+        coefficients: Option<Vec<BigInt>>,
     },
     Reconstruct {
         // List of shares for reconstruct the secret
-        #[arg(long, short)]
-        shares: Vec<String>,
+        #[arg(long, short, value_parser = parse_shares_param)]
+        shares: Vec<(BigInt, BigInt)>,
 
         /// Optional prime value
         #[arg(long, short, value_parser = clap::value_parser!(BigInt))]
@@ -117,13 +117,11 @@ fn main() {
         }
         Commands::Reconstruct { shares, prime } => {
             // Validate shares format is correct x,y
-            let share_points = parse_shares(&shares);
-
-            let (modulus, l_vec, sec) = reconstruct(share_points.clone(), prime.clone());
+            let (modulus, l_vec, sec) = reconstruct(shares.clone(), prime.clone());
 
             if args.verbose {
                 println!("Input: {:?} {:?}", shares, prime);
-                println!("share_points: {:?}", share_points);
+                println!("share_points: {:?}", shares);
                 println!("l_vec: {:?}", l_vec);
             }
 
@@ -135,7 +133,7 @@ fn main() {
             println!("───────────────────────────────");
             println!();
             println!("Input Shares:");
-            for s in &share_points {
+            for s in &shares {
                 println!("  {}: {}", &s.0, num_format(&s.1));
             }
             println!();
@@ -253,35 +251,34 @@ fn reconstruct(
     return (modulus, l_vec, sec);
 }
 
-fn parse_shares(shares: &Vec<String>) -> Vec<(BigInt, BigInt)> {
-    let mut share_points: Vec<(BigInt, BigInt)> = Vec::new();
-    for val in shares {
-        let s: Vec<&str> = val.split(",").collect();
-        if s.len() != 2 {
-            eprint!("cannot parse share param: {:?}", val);
-            std::process::exit(1);
-        }
-
-        let x: BigInt = BigInt::from_str(s[0]).unwrap_or_else(|e| {
-            eprint!(
-                "cannot parse x={} of share={:?} . Error: {:?}",
-                s[0], val, e
-            );
-            std::process::exit(1);
-        });
-
-        let y: BigInt = BigInt::from_str(s[1]).unwrap_or_else(|e| {
-            eprint!(
-                "cannot parse y={} of share={:?} . Error: {:?}",
-                s[1], val, e
-            );
-            std::process::exit(1);
-        });
-
-        share_points.push((x, y));
+fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
+    let mut share_point: (BigInt, BigInt) = (0.into(), 0.into());
+    let s: Vec<&str> = val.split(",").collect();
+    if s.len() != 2 {
+        return Err(format!("cannot parse share param: {:?}", val));
     }
 
-    return share_points;
+    match BigInt::from_str(s[0]) {
+        Ok(x) => share_point.0 = x,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse x={} of share={:?} . error: {:?}",
+                s[0], val, e
+            ));
+        }
+    };
+
+    match BigInt::from_str(s[1]) {
+        Ok(y) => share_point.1 = y,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse y={} of share={:?} . Error: {:?}",
+                s[1], val, e
+            ));
+        }
+    }
+
+    Ok(share_point)
 }
 
 fn posrem(a: BigInt, b: BigInt) -> BigInt {
