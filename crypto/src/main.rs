@@ -82,30 +82,30 @@ fn main() {
             prime,
             coefficients: arg_coefficients,
         } => {
-            let (share_vals, coefficients, modulus) = generate_share(
-                &secret,
+            let result = generate_share(GenerateShareParams {
+                secret: secret.clone(),
                 shares,
                 threshold,
                 prime,
-                arg_coefficients.map(|v| -> Vec<BigInt> {
+                coefficients: arg_coefficients.map(|v| -> Vec<BigInt> {
                     v.into_iter().map(|x| -> BigInt { x.into() }).collect()
                 }),
-            );
+            });
 
             if args.verbose {
-                println!("coefficients: {:?}", coefficients);
+                println!("coefficients: {:?}", result.coefficients);
             }
 
             println!();
             println!("Shamir's Secret Sharing        ");
             println!("───────────────────────────────");
-            println!("Prime: {}", num_format(&modulus));
-            println!("Threshold: {} of {}", threshold, shares);
+            println!("Prime: {}", num_format(&result.modulus));
+            println!("Threshold: {} of {}", threshold, &shares);
             println!("Secret: {}", num_format(&secret));
             println!("───────────────────────────────");
             println!();
             println!("Shares:");
-            for (i, val) in share_vals.iter().enumerate() {
+            for (i, val) in result.shares.iter().enumerate() {
                 println!("  {}: {}", i + 1, num_format(val));
             }
             println!();
@@ -145,34 +145,39 @@ fn main() {
     }
 }
 
-fn generate_share(
-    secret: &BigInt,
+struct GenerateShareParams {
+    secret: BigInt,
     shares: usize,
     threshold: usize,
     prime: Option<BigInt>,
     coefficients: Option<Vec<BigInt>>,
-) -> (Vec<BigInt>, Vec<BigInt>, BigInt) {
+}
+
+struct GenerateSharesResult {
+    shares: Vec<BigInt>,
+    coefficients: Vec<BigInt>,
+    modulus: BigInt,
+}
+
+fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
     // Modulus = prime
-    let modulus = match prime {
-        None => default_prime(),
-        Some(x) => x.into(),
-    };
+    let modulus = params.prime.unwrap_or(default_prime());
 
     // random generate coefficients
-    let mut coefficient_vals: Vec<BigInt> = Vec::new();
+    let mut coefficients: Vec<BigInt> = Vec::new();
 
-    match coefficients {
+    match params.coefficients {
         Some(arg_vals) => {
             for value in arg_vals {
-                coefficient_vals.push(value);
+                coefficients.push(value);
             }
         }
         None => {
             let mut rng = rand::thread_rng();
 
-            while coefficient_vals.len() < (threshold - 1) {
+            while coefficients.len() < (params.threshold - 1) {
                 let a = rng.gen_bigint_range(&BigInt::ZERO, &modulus.clone().into());
-                coefficient_vals.push(a);
+                coefficients.push(a);
             }
         }
     }
@@ -180,21 +185,25 @@ fn generate_share(
     // The polynomial function
     let polynomial_func = |x: i64| -> BigInt {
         let mut ret: BigInt = 0_u64.into();
-        for (index, value) in coefficient_vals.iter().enumerate() {
+        for (index, value) in coefficients.iter().enumerate() {
             ret += value * (x.pow((index as u32) + 1));
         }
-        posrem(ret + secret, modulus.clone())
+        posrem(ret + &params.secret, modulus.clone())
     };
 
     // Calculate shares
-    let mut share_vals: Vec<BigInt> = Vec::new();
-    while share_vals.len() < shares {
-        let index = share_vals.len();
+    let mut shares: Vec<BigInt> = Vec::new();
+    while shares.len() < params.shares {
+        let index = shares.len();
         let val = polynomial_func((index + 1) as i64);
-        share_vals.push(val);
+        shares.push(val);
     }
 
-    return (share_vals, coefficient_vals, modulus);
+    return GenerateSharesResult {
+        shares,
+        coefficients,
+        modulus,
+    };
 }
 
 fn reconstruct(
@@ -294,4 +303,29 @@ fn new_num_format(m: &NumMod) -> Box<dyn Fn(&BigInt) -> String> {
         NumMod::Hex => Box::new(move |n: &BigInt| format!("{:#x}", n)),
         NumMod::Dec => Box::new(move |n: &BigInt| format!("{}", n)),
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple() {
+        assert_eq!(1 + 1, 2);
+    }
+
+    #[test]
+    fn test_full_flow_default_params() {}
+
+    // TODO: test generate -> reconstruct with default params
+
+    // TODO: test generate with default params
+    // TODO: test generate with params full preset
+    // TODO: test generate with coefficients preset
+    // TODO: test generate with pirme preset
+    // TODO: test generate invalid of each params
+
+    // TODO: test reconstruct with default prime
+    // TODO: test reconstruct with preset params
+    // TODO: test reconstuct with invalid of each params
 }
