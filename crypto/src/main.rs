@@ -166,10 +166,10 @@ struct GenerateSharesResult {
 
 fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
     if params.secret < 0.into() || params.secret >= params.prime {
-        return Err("secret 0 <= secret < Prime".into());
+        return Err("invalid secret or prime values. It must be 0 <= secret < prime".into());
     }
-    if params.threshold > params.shares {
-        return Err("threshold cannot be greater than number of shares".into());
+    if params.threshold <= 0 || params.threshold > params.shares {
+        return Err("invalid threshold or share value. It must be 0 < threshold <= shares".into());
     }
 
     // random generate coefficients
@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_secret_must_smaller_than_prime_pass_cases() {
+    fn test_generate_secret_value_pass_cases() {
         let test_cases: Vec<(BigInt, BigInt)> = vec![
             (0.into(), 1613.into()),
             (0.into(), BigInt::from_str(PRIME_25519).unwrap()),
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_secret_must_smaller_than_prime_fail_cases() {
+    fn test_generate_secret_value_fail_cases() {
         let test_cases: Vec<(BigInt, BigInt)> = vec![
             ((-1_isize).into(), 1613.into()),
             ((-1_isize).into(), BigInt::from_str(PRIME_25519).unwrap()),
@@ -463,6 +463,44 @@ mod tests {
                 shares: 2,
                 threshold: 2,
                 prime: test_case.1.clone(),
+                coefficients: None,
+            });
+            assert!(
+                generate_result.is_err(),
+                "expected test case {:?} to be fail",
+                test_case
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_threshold_value_pass_cases() {
+        let test_cases: Vec<(usize, usize)> = vec![(1, 1), (1, 2), (2, 2), (3, 5), (5, 5)];
+        for test_case in test_cases {
+            let generate_result = generate_share(GenerateShareParams {
+                secret: 1234.into(),
+                threshold: test_case.0.clone(),
+                shares: test_case.1.clone(),
+                prime: 1613.into(),
+                coefficients: None,
+            });
+            assert!(
+                generate_result.is_ok(),
+                "expected test case {:?} to be pass",
+                test_case
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_threshold_value_fail_cases() {
+        let test_cases: Vec<(usize, usize)> = vec![(0, 1), (3, 2)];
+        for test_case in test_cases {
+            let generate_result = generate_share(GenerateShareParams {
+                secret: 1234.into(),
+                threshold: test_case.0.clone(),
+                shares: test_case.1.clone(),
+                prime: 1613.into(),
                 coefficients: None,
             });
             assert!(
