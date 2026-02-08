@@ -1,19 +1,11 @@
 use std::str::FromStr;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use num_bigint::{BigInt, RandBigInt, Sign};
+use num_bigint::{BigInt, RandBigInt};
 
-/// Curve25519 prime: 2^255 - 19 (little-endian bytes)
-pub fn default_prime() -> BigInt {
-    BigInt::from_bytes_le(
-        Sign::Plus,
-        &[
-            0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-            0xff, 0xff, 0xff, 0x7f,
-        ],
-    )
-}
+// Curve25519 prime: 2^255 - 19
+const PRIME_25519: &str =
+    "57896044618658097711785492504343953926634992332820282019728792003956564819949";
 
 #[derive(Parser, Debug)]
 #[command(name="shamir", version, about, long_about = None)]
@@ -52,8 +44,8 @@ enum Commands {
         threshold: usize,
 
         /// Optional prime value
-        #[arg(long, value_parser = clap::value_parser!(BigInt))]
-        prime: Option<BigInt>,
+        #[arg(long, value_parser = BigInt::from_str, default_value = PRIME_25519)]
+        prime: BigInt,
 
         /// Optional coefficients
         #[arg(long, value_delimiter = ',', value_parser = BigInt::from_str)]
@@ -65,8 +57,8 @@ enum Commands {
         shares: Vec<(BigInt, BigInt)>,
 
         /// Optional prime value
-        #[arg(long, short, value_parser = clap::value_parser!(BigInt))]
-        prime: Option<BigInt>,
+        #[arg(long, short, value_parser = BigInt::from_str, default_value = PRIME_25519)]
+        prime: BigInt,
     },
 }
 
@@ -86,7 +78,7 @@ fn main() {
                 secret: secret.clone(),
                 shares,
                 threshold,
-                prime,
+                prime: prime.clone(),
                 coefficients: arg_coefficients.map(|v| -> Vec<BigInt> {
                     v.into_iter().map(|x| -> BigInt { x.into() }).collect()
                 }),
@@ -99,7 +91,7 @@ fn main() {
             println!();
             println!("Shamir's Secret Sharing        ");
             println!("───────────────────────────────");
-            println!("Prime: {}", num_format(&result.modulus));
+            println!("Prime: {}", num_format(&result.prime));
             println!("Threshold: {} of {}", threshold, &shares);
             println!("Secret: {}", num_format(&secret));
             println!("───────────────────────────────");
@@ -152,20 +144,17 @@ struct GenerateShareParams {
     secret: BigInt,
     shares: usize,
     threshold: usize,
-    prime: Option<BigInt>,
+    prime: BigInt,
     coefficients: Option<Vec<BigInt>>,
 }
 
 struct GenerateSharesResult {
     shares: Vec<BigInt>,
     coefficients: Vec<BigInt>,
-    modulus: BigInt,
+    prime: BigInt,
 }
 
 fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
-    // Modulus = prime
-    let modulus = params.prime.unwrap_or(default_prime());
-
     // random generate coefficients
     let mut coefficients: Vec<BigInt> = Vec::new();
 
@@ -179,7 +168,7 @@ fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
             let mut rng = rand::thread_rng();
 
             while coefficients.len() < (params.threshold - 1) {
-                let a = rng.gen_bigint_range(&BigInt::ZERO, &modulus.clone().into());
+                let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime.clone().into());
                 coefficients.push(a);
             }
         }
@@ -191,7 +180,7 @@ fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
         for (index, value) in coefficients.iter().enumerate() {
             ret += value * (x.pow((index as u32) + 1));
         }
-        posrem(ret + &params.secret, modulus.clone())
+        posrem(ret + &params.secret, params.prime.clone())
     };
 
     // Calculate shares
@@ -205,13 +194,13 @@ fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
     return GenerateSharesResult {
         shares,
         coefficients,
-        modulus,
+        prime: params.prime,
     };
 }
 
 struct ReconstructParams {
     shares: Vec<(BigInt, BigInt)>,
-    prime: Option<BigInt>,
+    prime: BigInt,
 }
 
 //     return (modulus, l_vec, sec);
@@ -222,8 +211,6 @@ struct ReconstructResult {
 }
 
 fn reconstruct(params: ReconstructParams) -> ReconstructResult {
-    let modulus = params.prime.unwrap_or(default_prime());
-
     // For each key point:
     // Calculate: Li(0) mod p
     // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
@@ -252,26 +239,26 @@ fn reconstruct(params: ReconstructParams) -> ReconstructResult {
             denominator = -denominator;
         }
 
-        let demoninator_inv_mod = denominator.modinv(&modulus).unwrap_or_else(|| {
+        let demoninator_inv_mod = denominator.modinv(&params.prime).unwrap_or_else(|| {
             println!("cannot calculate inverse mod for share={:?}", val);
             std::process::exit(1);
         });
 
-        let l = posrem(numerator * demoninator_inv_mod, modulus.clone());
+        let l = posrem(numerator * demoninator_inv_mod, params.prime.clone());
         verify += &l;
-        sec = (sec + (&val.1 * &l)) % &modulus;
+        sec = (sec + (&val.1 * &l)) % &params.prime;
         l_vec.push((val.0.clone(), val.1.clone(), l));
     }
 
     // Verify: Sum(Li) = 1 mod p
-    if verify % &modulus != 1.into() {
+    if verify % &params.prime != 1.into() {
         println!("shares are not in the same polynomial");
         std::process::exit(1);
     }
 
     return ReconstructResult {
         secret: sec,
-        prime: modulus,
+        prime: params.prime,
         basis_l_vals: l_vec.iter().map(|x| x.2.clone()).collect(),
     };
 }
