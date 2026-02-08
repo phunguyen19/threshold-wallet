@@ -318,17 +318,68 @@ mod tests {
     }
 
     #[test]
-    fn test_full_flow_default_params() {}
+    fn test_full_flow_preset() {
+        let generate_result = generate_share(GenerateShareParams {
+            secret: 1234.into(),
+            shares: 5,
+            threshold: 3,
+            prime: 1613.into(),
+            coefficients: Some(vec![166.into(), 94.into()]),
+        });
+        assert_eq!(
+            generate_result.shares,
+            [1494.into(), 329.into(), 965.into(), 176.into(), 1188.into()]
+        );
+        let reconstruct_result = reconstruct(ReconstructParams {
+            shares: vec![
+                (1.into(), 1494.into()),
+                (3.into(), 965.into()),
+                (5.into(), 1188.into()),
+            ],
+            prime: 1613.into(),
+        });
+        assert_eq!(reconstruct_result.secret, 1234.into());
+    }
 
-    // TODO: test generate -> reconstruct with default params
+    #[test]
+    fn test_full_flow_prime_25519() {
+        let prime = BigInt::from_str(PRIME_25519).unwrap();
+        let generate_result = generate_share(GenerateShareParams {
+            secret: 1234.into(),
+            shares: 5,
+            threshold: 3,
+            prime: prime.clone(),
+            coefficients: Some(vec![166.into(), 94.into()]),
+        });
+        let reconstruct_result = reconstruct(ReconstructParams {
+            shares: vec![
+                (1.into(), generate_result.shares[0].clone().into()),
+                (3.into(), generate_result.shares[2].clone().into()),
+                (5.into(), generate_result.shares[4].clone().into()),
+            ],
+            prime,
+        });
+        assert_eq!(reconstruct_result.secret, 1234.into());
+    }
 
-    // TODO: test generate with default params
-    // TODO: test generate with params full preset
-    // TODO: test generate with coefficients preset
-    // TODO: test generate with pirme preset
-    // TODO: test generate invalid of each params
-
-    // TODO: test reconstruct with default prime
-    // TODO: test reconstruct with preset params
-    // TODO: test reconstuct with invalid of each params
+    #[test]
+    fn test_random_coefficients() {
+        let prime = BigInt::from_str(PRIME_25519).unwrap();
+        let generate_result = generate_share(GenerateShareParams {
+            secret: 1234.into(),
+            shares: 5,
+            threshold: 3,
+            prime: prime.clone(),
+            coefficients: None,
+        });
+        let reconstruct_result = reconstruct(ReconstructParams {
+            shares: vec![
+                (1.into(), generate_result.shares[0].clone().into()),
+                (3.into(), generate_result.shares[2].clone().into()),
+                (5.into(), generate_result.shares[4].clone().into()),
+            ],
+            prime,
+        });
+        assert_eq!(reconstruct_result.secret, 1234.into());
+    }
 }
