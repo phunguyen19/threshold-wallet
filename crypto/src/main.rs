@@ -117,18 +117,21 @@ fn main() {
         }
         Commands::Reconstruct { shares, prime } => {
             // Validate shares format is correct x,y
-            let (modulus, l_vec, sec) = reconstruct(shares.clone(), prime.clone());
+            let result = reconstruct(ReconstructParams {
+                shares: shares.clone(),
+                prime: prime.clone(),
+            });
 
             if args.verbose {
                 println!("Input: {:?} {:?}", shares, prime);
                 println!("share_points: {:?}", shares);
-                println!("l_vec: {:?}", l_vec);
+                println!("l_vec: {:?}", result.basis_l_vals);
             }
 
             println!();
             println!("Shamir's Secret Reconstruction ");
             println!("───────────────────────────────");
-            println!("Prime: {}", num_format(&modulus));
+            println!("Prime: {}", num_format(&result.prime));
             println!("Shares: {} provided", shares.len());
             println!("───────────────────────────────");
             println!();
@@ -139,7 +142,7 @@ fn main() {
             println!();
             println!("✓ Reconstructed Secret");
             println!("──────────────────────");
-            println!("Secret: {}", num_format(&sec));
+            println!("Secret: {}", num_format(&result.secret));
             println!("──────────────────────");
         }
     }
@@ -206,11 +209,20 @@ fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
     };
 }
 
-fn reconstruct(
-    share_points: Vec<(BigInt, BigInt)>,
+struct ReconstructParams {
+    shares: Vec<(BigInt, BigInt)>,
     prime: Option<BigInt>,
-) -> (BigInt, Vec<(BigInt, BigInt, BigInt)>, BigInt) {
-    let modulus = prime.unwrap_or(default_prime());
+}
+
+//     return (modulus, l_vec, sec);
+struct ReconstructResult {
+    secret: BigInt,
+    prime: BigInt,
+    basis_l_vals: Vec<BigInt>,
+}
+
+fn reconstruct(params: ReconstructParams) -> ReconstructResult {
+    let modulus = params.prime.unwrap_or(default_prime());
 
     // For each key point:
     // Calculate: Li(0) mod p
@@ -224,10 +236,10 @@ fn reconstruct(
     // q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x)
     let mut sec: BigInt = 0.into();
 
-    for val in &share_points {
+    for val in &params.shares {
         let mut numerator: BigInt = 1_usize.into();
         let mut denominator: BigInt = 1_usize.into();
-        for val2 in &share_points {
+        for val2 in &params.shares {
             if val2.0 == val.0 {
                 continue;
             }
@@ -257,7 +269,11 @@ fn reconstruct(
         std::process::exit(1);
     }
 
-    return (modulus, l_vec, sec);
+    return ReconstructResult {
+        secret: sec,
+        prime: modulus,
+        basis_l_vals: l_vec.iter().map(|x| x.2.clone()).collect(),
+    };
 }
 
 fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
