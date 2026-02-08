@@ -62,7 +62,7 @@ enum Commands {
     },
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     let args = Cli::parse();
     let num_format = new_num_format(&args.num_mod);
 
@@ -74,7 +74,8 @@ fn main() {
             prime,
             coefficients: arg_coefficients,
         } => {
-            let result = generate_share(GenerateShareParams {
+            let result: GenerateSharesResult;
+            match generate_share(GenerateShareParams {
                 secret: secret.clone(),
                 shares,
                 threshold,
@@ -82,7 +83,10 @@ fn main() {
                 coefficients: arg_coefficients.map(|v| -> Vec<BigInt> {
                     v.into_iter().map(|x| -> BigInt { x.into() }).collect()
                 }),
-            });
+            }) {
+                Ok(r) => result = r,
+                Err(e) => return Err(e),
+            };
 
             if args.verbose {
                 println!("coefficients: {:?}", result.coefficients);
@@ -97,8 +101,8 @@ fn main() {
             println!("───────────────────────────────");
             println!();
             println!("Shares:");
-            for (i, val) in result.shares.iter().enumerate() {
-                println!("  {}: {}", i + 1, num_format(val));
+            for (_, (share_index, share_val)) in result.shares.iter().enumerate() {
+                println!("  {}: {}", share_index, num_format(share_val));
             }
             println!();
             println!("───────────────────────────────");
@@ -109,10 +113,14 @@ fn main() {
         }
         Commands::Reconstruct { shares, prime } => {
             // Validate shares format is correct x,y
-            let result = reconstruct(ReconstructParams {
+            let result: ReconstructResult;
+            match reconstruct(ReconstructParams {
                 shares: shares.clone(),
                 prime: prime.clone(),
-            });
+            }) {
+                Ok(v) => result = v,
+                Err(e) => return Err(e),
+            };
 
             if args.verbose {
                 println!("Input: {:?} {:?}", shares, prime);
@@ -137,7 +145,9 @@ fn main() {
             println!("Secret: {}", num_format(&result.secret));
             println!("──────────────────────");
         }
-    }
+    };
+
+    Ok(())
 }
 
 struct GenerateShareParams {
@@ -149,12 +159,19 @@ struct GenerateShareParams {
 }
 
 struct GenerateSharesResult {
-    shares: Vec<BigInt>,
+    shares: Vec<(BigInt, BigInt)>,
     coefficients: Vec<BigInt>,
     prime: BigInt,
 }
 
-fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
+fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
+    if params.secret >= params.prime {
+        return Err("secret must be smaller than prime value".into());
+    }
+    if params.threshold > params.shares {
+        return Err("threshold cannot be greater than number of shares".into());
+    }
+
     // random generate coefficients
     let mut coefficients: Vec<BigInt> = Vec::new();
 
@@ -175,27 +192,28 @@ fn generate_share(params: GenerateShareParams) -> GenerateSharesResult {
     }
 
     // The polynomial function
-    let polynomial_func = |x: i64| -> BigInt {
+    let polynomial_func = |x: BigInt| -> BigInt {
         let mut ret: BigInt = 0_u64.into();
-        for (index, value) in coefficients.iter().enumerate() {
-            ret += value * (x.pow((index as u32) + 1));
+        for (i, value) in coefficients.iter().enumerate() {
+            let degree = (i as u32) + 1_u32;
+            ret += posrem(value * x.pow(degree), params.prime.clone());
         }
         posrem(ret + &params.secret, params.prime.clone())
     };
 
     // Calculate shares
-    let mut shares: Vec<BigInt> = Vec::new();
+    let mut shares: Vec<(BigInt, BigInt)> = Vec::new();
     while shares.len() < params.shares {
-        let index = shares.len();
-        let val = polynomial_func((index + 1) as i64);
-        shares.push(val);
+        let index = shares.len() + 1;
+        let val = polynomial_func(index.into());
+        shares.push((index.into(), val));
     }
 
-    return GenerateSharesResult {
+    return Ok(GenerateSharesResult {
         shares,
         coefficients,
         prime: params.prime,
-    };
+    });
 }
 
 struct ReconstructParams {
@@ -210,7 +228,7 @@ struct ReconstructResult {
     basis_l_vals: Vec<BigInt>,
 }
 
-fn reconstruct(params: ReconstructParams) -> ReconstructResult {
+fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
     // For each key point:
     // Calculate: Li(0) mod p
     // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
@@ -239,28 +257,28 @@ fn reconstruct(params: ReconstructParams) -> ReconstructResult {
             denominator = -denominator;
         }
 
-        let demoninator_inv_mod = denominator.modinv(&params.prime).unwrap_or_else(|| {
-            println!("cannot calculate inverse mod for share={:?}", val);
-            std::process::exit(1);
-        });
+        let denominator_inv_mod: BigInt;
+        match denominator.modinv(&params.prime) {
+            Some(v) => denominator_inv_mod = v,
+            None => return Err(format!("cannot calculate inverse mod for share={:?}", val)),
+        };
 
-        let l = posrem(numerator * demoninator_inv_mod, params.prime.clone());
+        let l = posrem(numerator * denominator_inv_mod, params.prime.clone());
         verify += &l;
-        sec = (sec + (&val.1 * &l)) % &params.prime;
+        sec = posrem(sec + (&val.1 * &l), params.prime.clone());
         l_vec.push((val.0.clone(), val.1.clone(), l));
     }
 
     // Verify: Sum(Li) = 1 mod p
     if verify % &params.prime != 1.into() {
-        println!("shares are not in the same polynomial");
-        std::process::exit(1);
+        return Err("shares are not in the same polynomial".into());
     }
 
-    return ReconstructResult {
+    return Ok(ReconstructResult {
         secret: sec,
         prime: params.prime,
         basis_l_vals: l_vec.iter().map(|x| x.2.clone()).collect(),
-    };
+    });
 }
 
 fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
@@ -320,10 +338,17 @@ mod tests {
             threshold: 3,
             prime: 1613.into(),
             coefficients: Some(vec![166.into(), 94.into()]),
-        });
+        })
+        .unwrap();
         assert_eq!(
             generate_result.shares,
-            [1494.into(), 329.into(), 965.into(), 176.into(), 1188.into()]
+            [
+                (1.into(), 1494.into()),
+                (2.into(), 329.into()),
+                (3.into(), 965.into()),
+                (4.into(), 176.into()),
+                (5.into(), 1188.into())
+            ]
         );
         let reconstruct_result = reconstruct(ReconstructParams {
             shares: vec![
@@ -332,7 +357,8 @@ mod tests {
                 (5.into(), 1188.into()),
             ],
             prime: 1613.into(),
-        });
+        })
+        .unwrap();
         assert_eq!(reconstruct_result.secret, 1234.into());
     }
 
@@ -345,15 +371,17 @@ mod tests {
             threshold: 3,
             prime: prime.clone(),
             coefficients: Some(vec![166.into(), 94.into()]),
-        });
+        })
+        .unwrap();
         let reconstruct_result = reconstruct(ReconstructParams {
             shares: vec![
-                (1.into(), generate_result.shares[0].clone().into()),
-                (3.into(), generate_result.shares[2].clone().into()),
-                (5.into(), generate_result.shares[4].clone().into()),
+                generate_result.shares[0].clone(),
+                generate_result.shares[2].clone(),
+                generate_result.shares[4].clone(),
             ],
             prime,
-        });
+        })
+        .unwrap();
         assert_eq!(reconstruct_result.secret, 1234.into());
     }
 
@@ -366,16 +394,69 @@ mod tests {
             threshold: 3,
             prime: prime.clone(),
             coefficients: None,
-        });
+        })
+        .unwrap();
         let reconstruct_result = reconstruct(ReconstructParams {
             shares: vec![
-                (1.into(), generate_result.shares[0].clone().into()),
-                (3.into(), generate_result.shares[2].clone().into()),
-                (5.into(), generate_result.shares[4].clone().into()),
+                generate_result.shares[0].clone(),
+                generate_result.shares[2].clone(),
+                generate_result.shares[4].clone(),
             ],
             prime,
-        });
+        })
+        .unwrap();
         assert_eq!(reconstruct_result.secret, 1234.into());
+    }
+
+    #[test]
+    fn test_generate_secret_must_smaller_than_prime_pass_cases() {
+        let pass_cases: Vec<(BigInt, BigInt)> = vec![
+            (0.into(), 1613.into()),
+            (0.into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (1.into(), 1613.into()),
+            (1.into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (1234.into(), 1613.into()),
+            (1234.into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (1612.into(), 1613.into()),
+            (
+                BigInt::from_str(PRIME_25519).unwrap() - 1,
+                BigInt::from_str(PRIME_25519).unwrap(),
+            ),
+        ];
+        for (secret, prime) in pass_cases {
+            let generate_result = generate_share(GenerateShareParams {
+                secret: secret.clone(),
+                shares: 2,
+                threshold: 2,
+                prime: prime.clone(),
+                coefficients: None,
+            })
+            .unwrap();
+            let reconstruct_result = reconstruct(ReconstructParams {
+                shares: generate_result.shares,
+                prime,
+            })
+            .unwrap();
+            assert_eq!(reconstruct_result.secret, secret);
+        }
+    }
+
+    #[test]
+    fn test_generate_secret_must_smaller_than_prime_fail_cases() {
+        let fail_cases: Vec<(BigInt, BigInt)> = vec![
+            ((-1_isize).into(), 1613.into()),
+            ((-1_isize).into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (1613.into(), 1613.into()),
+            (1614.into(), 1613.into()),
+            (
+                BigInt::from_str(PRIME_25519).unwrap(),
+                BigInt::from_str(PRIME_25519).unwrap(),
+            ),
+            (
+                BigInt::from_str(PRIME_25519).unwrap() + 1,
+                BigInt::from_str(PRIME_25519).unwrap(),
+            ),
+        ];
     }
 
     #[test]
