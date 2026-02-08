@@ -165,8 +165,8 @@ struct GenerateSharesResult {
 }
 
 fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
-    if params.secret >= params.prime {
-        return Err("secret must be smaller than prime value".into());
+    if params.secret < 0.into() || params.secret >= params.prime {
+        return Err("secret 0 <= secret < Prime".into());
     }
     if params.threshold > params.shares {
         return Err("threshold cannot be greater than number of shares".into());
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_generate_secret_must_smaller_than_prime_pass_cases() {
-        let pass_cases: Vec<(BigInt, BigInt)> = vec![
+        let test_cases: Vec<(BigInt, BigInt)> = vec![
             (0.into(), 1613.into()),
             (0.into(), BigInt::from_str(PRIME_25519).unwrap()),
             (1.into(), 1613.into()),
@@ -423,7 +423,7 @@ mod tests {
                 BigInt::from_str(PRIME_25519).unwrap(),
             ),
         ];
-        for (secret, prime) in pass_cases {
+        for (secret, prime) in test_cases {
             let generate_result = generate_share(GenerateShareParams {
                 secret: secret.clone(),
                 shares: 2,
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_generate_secret_must_smaller_than_prime_fail_cases() {
-        let fail_cases: Vec<(BigInt, BigInt)> = vec![
+        let test_cases: Vec<(BigInt, BigInt)> = vec![
             ((-1_isize).into(), 1613.into()),
             ((-1_isize).into(), BigInt::from_str(PRIME_25519).unwrap()),
             (1613.into(), 1613.into()),
@@ -457,6 +457,20 @@ mod tests {
                 BigInt::from_str(PRIME_25519).unwrap(),
             ),
         ];
+        for test_case in test_cases {
+            let generate_result = generate_share(GenerateShareParams {
+                secret: test_case.0.clone(),
+                shares: 2,
+                threshold: 2,
+                prime: test_case.1.clone(),
+                coefficients: None,
+            });
+            assert!(
+                generate_result.is_err(),
+                "expected test case {:?} to be fail",
+                test_case
+            );
+        }
     }
 
     #[test]
