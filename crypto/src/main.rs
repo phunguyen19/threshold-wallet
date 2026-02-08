@@ -295,7 +295,7 @@ fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
 
 fn posrem(a: BigInt, b: BigInt) -> BigInt {
     if a < 0.into() {
-        &b - ((-a) % &b)
+        (&b - ((-a) % &b)) % &b
     } else {
         a % &b
     }
@@ -311,11 +311,6 @@ fn new_num_format(m: &NumMod) -> Box<dyn Fn(&BigInt) -> String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_simple() {
-        assert_eq!(1 + 1, 2);
-    }
 
     #[test]
     fn test_full_flow_preset() {
@@ -381,5 +376,29 @@ mod tests {
             prime,
         });
         assert_eq!(reconstruct_result.secret, 1234.into());
+    }
+
+    #[test]
+    fn test_posrem() {
+        let test_cases = [
+            (-13, 5, 2),
+            (-5, 5, 0),
+            (-1, 5, 4),
+            (0, 5, 0),
+            (1, 5, 1),
+            (5, 5, 0),
+            (13, 5, 3),
+        ];
+
+        for (a, b, expected) in test_cases {
+            assert_eq!(
+                posrem(a.into(), b.into()),
+                expected.into(),
+                "posrem({}, {}) should be {}",
+                a,
+                b,
+                expected
+            )
+        }
     }
 }
