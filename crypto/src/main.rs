@@ -489,6 +489,11 @@ mod tests {
                 "expected test case {:?} to be pass",
                 test_case
             );
+            let reconstruct_result = reconstruct(ReconstructParams {
+                shares: generate_result.unwrap().shares,
+                prime: 1613.into(),
+            });
+            assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
         }
     }
 
@@ -510,6 +515,9 @@ mod tests {
             );
         }
     }
+
+    // #[test]
+    // fn test_user_coefficient
 
     #[test]
     fn test_posrem() {
