@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use num_bigint::{BigInt, RandBigInt};
 
 // Curve25519 prime: 2^255 - 19
-const PRIME_25519: &str =
+const PRIME_25519_STR: &str =
     "57896044618658097711785492504343953926634992332820282019728792003956564819949";
 
 #[derive(Parser, Debug)]
@@ -44,7 +44,7 @@ enum Commands {
         threshold: usize,
 
         /// Optional prime value
-        #[arg(long, value_parser = BigInt::from_str, default_value = PRIME_25519)]
+        #[arg(long, value_parser = BigInt::from_str, default_value = PRIME_25519_STR)]
         prime: BigInt,
 
         /// Optional coefficients
@@ -57,7 +57,7 @@ enum Commands {
         shares: Vec<(BigInt, BigInt)>,
 
         /// Optional prime value
-        #[arg(long, short, value_parser = BigInt::from_str, default_value = PRIME_25519)]
+        #[arg(long, short, value_parser = BigInt::from_str, default_value = PRIME_25519_STR)]
         prime: BigInt,
     },
 }
@@ -168,9 +168,20 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
     if params.secret < 0.into() || params.secret >= params.prime {
         return Err("invalid secret or prime values. It must be 0 <= secret < prime".into());
     }
-    if params.threshold <= 0 || params.threshold > params.shares {
-        return Err("invalid threshold or share value. It must be 0 < threshold <= shares".into());
+    if params.threshold < 2 || params.threshold > params.shares {
+        return Err("invalid threshold or share value. It must be 1 < threshold <= shares".into());
     }
+    match &params.coefficients {
+        Some(c) => {
+            if c.len() != params.threshold - 1 {
+                return Err("coefficients list must be equal threshold -1".into());
+            }
+            if c.iter().find(|&x| x.clone() < 0.into()).is_some() {
+                return Err("coefficient values must be in [0, p)".into());
+            }
+        }
+        None => {}
+    };
 
     // random generate coefficients
     let mut coefficients: Vec<BigInt> = Vec::new();
@@ -364,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_full_flow_prime_25519() {
-        let prime = BigInt::from_str(PRIME_25519).unwrap();
+        let prime = BigInt::from_str(PRIME_25519_STR).unwrap();
         let generate_result = generate_share(GenerateShareParams {
             secret: 1234.into(),
             shares: 5,
@@ -387,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_random_coefficients() {
-        let prime = BigInt::from_str(PRIME_25519).unwrap();
+        let prime = BigInt::from_str(PRIME_25519_STR).unwrap();
         let generate_result = generate_share(GenerateShareParams {
             secret: 1234.into(),
             shares: 5,
@@ -412,15 +423,15 @@ mod tests {
     fn test_generate_secret_value_pass_cases() {
         let test_cases: Vec<(BigInt, BigInt)> = vec![
             (0.into(), 1613.into()),
-            (0.into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (0.into(), BigInt::from_str(PRIME_25519_STR).unwrap()),
             (1.into(), 1613.into()),
-            (1.into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (1.into(), BigInt::from_str(PRIME_25519_STR).unwrap()),
             (1234.into(), 1613.into()),
-            (1234.into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (1234.into(), BigInt::from_str(PRIME_25519_STR).unwrap()),
             (1612.into(), 1613.into()),
             (
-                BigInt::from_str(PRIME_25519).unwrap() - 1,
-                BigInt::from_str(PRIME_25519).unwrap(),
+                BigInt::from_str(PRIME_25519_STR).unwrap() - 1,
+                BigInt::from_str(PRIME_25519_STR).unwrap(),
             ),
         ];
         for (secret, prime) in test_cases {
@@ -445,16 +456,19 @@ mod tests {
     fn test_generate_secret_value_fail_cases() {
         let test_cases: Vec<(BigInt, BigInt)> = vec![
             ((-1_isize).into(), 1613.into()),
-            ((-1_isize).into(), BigInt::from_str(PRIME_25519).unwrap()),
+            (
+                (-1_isize).into(),
+                BigInt::from_str(PRIME_25519_STR).unwrap(),
+            ),
             (1613.into(), 1613.into()),
             (1614.into(), 1613.into()),
             (
-                BigInt::from_str(PRIME_25519).unwrap(),
-                BigInt::from_str(PRIME_25519).unwrap(),
+                BigInt::from_str(PRIME_25519_STR).unwrap(),
+                BigInt::from_str(PRIME_25519_STR).unwrap(),
             ),
             (
-                BigInt::from_str(PRIME_25519).unwrap() + 1,
-                BigInt::from_str(PRIME_25519).unwrap(),
+                BigInt::from_str(PRIME_25519_STR).unwrap() + 1,
+                BigInt::from_str(PRIME_25519_STR).unwrap(),
             ),
         ];
         for test_case in test_cases {
@@ -474,50 +488,90 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_threshold_value_pass_cases() {
-        let test_cases: Vec<(usize, usize)> = vec![(1, 1), (1, 2), (2, 2), (3, 5), (5, 5)];
+    fn test_generate_threshold_value() {
+        let test_cases: Vec<(bool, usize, usize)> = vec![
+            (true, 2, 2),
+            (true, 3, 5),
+            (true, 5, 5),
+            (false, 1, 1),
+            (false, 1, 2),
+            (false, 0, 1),
+            (false, 3, 2),
+        ];
+
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
                 secret: 1234.into(),
-                threshold: test_case.0.clone(),
-                shares: test_case.1.clone(),
+                threshold: test_case.1.clone(),
+                shares: test_case.2.clone(),
                 prime: 1613.into(),
                 coefficients: None,
             });
-            assert!(
-                generate_result.is_ok(),
-                "expected test case {:?} to be pass",
-                test_case
-            );
-            let reconstruct_result = reconstruct(ReconstructParams {
-                shares: generate_result.unwrap().shares,
-                prime: 1613.into(),
-            });
-            assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+            match test_case.0 {
+                false => {
+                    assert!(
+                        generate_result.is_err(),
+                        "expected test case {:?} to be fail",
+                        test_case
+                    );
+                }
+                true => {
+                    assert!(
+                        generate_result.is_ok(),
+                        "expected test case {:?} to be pass",
+                        test_case
+                    );
+                    let reconstruct_result = reconstruct(ReconstructParams {
+                        shares: generate_result.unwrap().shares,
+                        prime: 1613.into(),
+                    });
+                    assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                }
+            }
         }
     }
 
     #[test]
-    fn test_generate_threshold_value_fail_cases() {
-        let test_cases: Vec<(usize, usize)> = vec![(0, 1), (3, 2)];
+    fn test_coefficients_user_provided() {
+        let test_cases: Vec<(bool, usize, Vec<BigInt>)> = vec![
+            (true, 2, vec![0.into()]),
+            (true, 2, vec![1.into()]),
+            (true, 3, vec![0.into(), 0.into()]),
+            (true, 3, vec![1.into(), 2.into()]),
+            (false, 2, vec![(-1_isize).into()]),
+            (false, 3, vec![1.into(), (-2_isize).into()]),
+        ];
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
                 secret: 1234.into(),
-                threshold: test_case.0.clone(),
+                threshold: test_case.1.clone(),
                 shares: test_case.1.clone(),
                 prime: 1613.into(),
-                coefficients: None,
+                coefficients: Some(test_case.2.clone()),
             });
-            assert!(
-                generate_result.is_err(),
-                "expected test case {:?} to be fail",
-                test_case
-            );
+            match test_case.0 {
+                false => {
+                    assert!(
+                        generate_result.is_err(),
+                        "expected test case {:?} to be fail",
+                        test_case
+                    );
+                }
+                true => {
+                    assert!(
+                        generate_result.is_ok(),
+                        "expected test case {:?} to be pass",
+                        test_case
+                    );
+                    let reconstruct_result = reconstruct(ReconstructParams {
+                        shares: generate_result.unwrap().shares,
+                        prime: 1613.into(),
+                    });
+                    assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                }
+            }
         }
     }
-
-    // #[test]
-    // fn test_user_coefficient
 
     #[test]
     fn test_posrem() {
