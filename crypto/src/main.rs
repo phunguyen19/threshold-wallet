@@ -269,7 +269,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
     }
 
     // Verify: Sum(Li) = 1 mod p
-    if verify % &params.prime != 1.into() {
+    if posrem(verify, params.prime.clone()) != 1.into() {
         return Err("shares are not in the same polynomial".into());
     }
 
@@ -522,14 +522,20 @@ mod tests {
     #[test]
     fn test_coefficients_user_provided() {
         let test_cases: Vec<(bool, usize, Vec<BigInt>)> = vec![
+            // pass cases
             (true, 2, vec![0.into()]),
             (true, 2, vec![1.into()]),
             (true, 3, vec![0.into(), 0.into()]),
             (true, 3, vec![1.into(), 2.into()]),
+            // fail cases: value must be [0, p)
             (false, 2, vec![(-1_isize).into()]),
             (false, 3, vec![1.into(), (-2_isize).into()]),
             (false, 3, vec![1.into(), 1613.into()]),
             (false, 3, vec![1.into(), 1614.into()]),
+            // fail cases: wrong count
+            (false, 2, vec![1.into(), 2.into()]),
+            (false, 3, vec![1.into()]),
+            (false, 3, vec![1.into(), 2.into(), 3.into()]),
         ];
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
