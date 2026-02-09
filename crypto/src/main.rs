@@ -165,7 +165,9 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         if c.len() != params.threshold - 1 {
             return Err("coefficients list must be equal threshold -1".into());
         }
-        if c.iter().any(|x| x.clone() < 0.into()) {
+        if c.iter()
+            .any(|x| x.clone() < 0.into() || x.clone() >= params.prime)
+        {
             return Err("coefficient values must be in [0, p)".into());
         }
     }
@@ -182,7 +184,7 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         None => {
             let mut rng = rand::thread_rng();
 
-            while coefficients.len() < (params.threshold - 1) {
+            for _ in 0..(params.threshold - 1) {
                 let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime.clone());
                 coefficients.push(a);
             }
@@ -526,6 +528,8 @@ mod tests {
             (true, 3, vec![1.into(), 2.into()]),
             (false, 2, vec![(-1_isize).into()]),
             (false, 3, vec![1.into(), (-2_isize).into()]),
+            (false, 3, vec![1.into(), 1613.into()]),
+            (false, 3, vec![1.into(), 1614.into()]),
         ];
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
