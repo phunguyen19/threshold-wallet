@@ -74,19 +74,13 @@ fn main() -> Result<(), String> {
             prime,
             coefficients: arg_coefficients,
         } => {
-            let result: GenerateSharesResult;
-            match generate_share(GenerateShareParams {
+            let result = generate_share(GenerateShareParams {
                 secret: secret.clone(),
                 shares,
                 threshold,
                 prime: prime.clone(),
-                coefficients: arg_coefficients.map(|v| -> Vec<BigInt> {
-                    v.into_iter().map(|x| -> BigInt { x.into() }).collect()
-                }),
-            }) {
-                Ok(r) => result = r,
-                Err(e) => return Err(e),
-            };
+                coefficients: arg_coefficients,
+            })?;
 
             if args.verbose {
                 println!("coefficients: {:?}", result.coefficients);
@@ -101,7 +95,7 @@ fn main() -> Result<(), String> {
             println!("───────────────────────────────");
             println!();
             println!("Shares:");
-            for (_, (share_index, share_val)) in result.shares.iter().enumerate() {
+            for (share_index, share_val) in result.shares.iter() {
                 println!("  {}: {}", share_index, num_format(share_val));
             }
             println!();
@@ -113,14 +107,10 @@ fn main() -> Result<(), String> {
         }
         Commands::Reconstruct { shares, prime } => {
             // Validate shares format is correct x,y
-            let result: ReconstructResult;
-            match reconstruct(ReconstructParams {
+            let result = reconstruct(ReconstructParams {
                 shares: shares.clone(),
                 prime: prime.clone(),
-            }) {
-                Ok(v) => result = v,
-                Err(e) => return Err(e),
-            };
+            })?;
 
             if args.verbose {
                 println!("Input: {:?} {:?}", shares, prime);
@@ -171,17 +161,14 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
     if params.threshold < 2 || params.threshold > params.shares {
         return Err("invalid threshold or share value. It must be 1 < threshold <= shares".into());
     }
-    match &params.coefficients {
-        Some(c) => {
-            if c.len() != params.threshold - 1 {
-                return Err("coefficients list must be equal threshold -1".into());
-            }
-            if c.iter().find(|&x| x.clone() < 0.into()).is_some() {
-                return Err("coefficient values must be in [0, p)".into());
-            }
+    if let Some(c) = &params.coefficients {
+        if c.len() != params.threshold - 1 {
+            return Err("coefficients list must be equal threshold -1".into());
         }
-        None => {}
-    };
+        if c.iter().any(|x| x.clone() < 0.into()) {
+            return Err("coefficient values must be in [0, p)".into());
+        }
+    }
 
     // random generate coefficients
     let mut coefficients: Vec<BigInt> = Vec::new();
@@ -196,7 +183,7 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
             let mut rng = rand::thread_rng();
 
             while coefficients.len() < (params.threshold - 1) {
-                let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime.clone().into());
+                let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime.clone());
                 coefficients.push(a);
             }
         }
@@ -220,11 +207,11 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         shares.push((index.into(), val));
     }
 
-    return Ok(GenerateSharesResult {
+    Ok(GenerateSharesResult {
         shares,
         coefficients,
         prime: params.prime,
-    });
+    })
 }
 
 struct ReconstructParams {
@@ -268,9 +255,8 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
             denominator = -denominator;
         }
 
-        let denominator_inv_mod: BigInt;
-        match denominator.modinv(&params.prime) {
-            Some(v) => denominator_inv_mod = v,
+        let denominator_inv_mod = match denominator.modinv(&params.prime) {
+            Some(v) => v,
             None => return Err(format!("cannot calculate inverse mod for share={:?}", val)),
         };
 
@@ -285,11 +271,11 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
         return Err("shares are not in the same polynomial".into());
     }
 
-    return Ok(ReconstructResult {
+    Ok(ReconstructResult {
         secret: sec,
         prime: params.prime,
         basis_l_vals: l_vec.iter().map(|x| x.2.clone()).collect(),
-    });
+    })
 }
 
 fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
