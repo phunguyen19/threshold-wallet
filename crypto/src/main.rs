@@ -329,6 +329,32 @@ fn new_num_format(m: &NumMod) -> Box<dyn Fn(&BigInt) -> String> {
 mod tests {
     use super::*;
 
+    /// Generate all k-sized subsets of a slice
+    fn subsets<T: Clone>(items: &[T], k: usize) -> Vec<Vec<T>> {
+        let mut result = Vec::new();
+        let mut current = Vec::with_capacity(k);
+        build_subsets(items, k, 0, &mut current, &mut result);
+        result
+    }
+
+    fn build_subsets<T: Clone>(
+        items: &[T],
+        k: usize,
+        start: usize,
+        current: &mut Vec<T>,
+        result: &mut Vec<Vec<T>>,
+    ) {
+        if current.len() == k {
+            result.push(current.clone());
+            return;
+        }
+        for i in start..items.len() {
+            current.push(items[i].clone());
+            build_subsets(items, k, i + 1, current, result);
+            current.pop();
+        }
+    }
+
     #[test]
     fn test_full_flow_preset() {
         let generate_result = generate_share(GenerateShareParams {
@@ -349,16 +375,14 @@ mod tests {
                 (5.into(), 1188.into())
             ]
         );
-        let reconstruct_result = reconstruct(ReconstructParams {
-            shares: vec![
-                (1.into(), 1494.into()),
-                (3.into(), 965.into()),
-                (5.into(), 1188.into()),
-            ],
-            prime: 1613.into(),
-        })
-        .unwrap();
-        assert_eq!(reconstruct_result.secret, 1234.into());
+        for val in subsets(&generate_result.shares, 3) {
+            let reconstruct_result = reconstruct(ReconstructParams {
+                shares: val,
+                prime: 1613.into(),
+            })
+            .unwrap();
+            assert_eq!(reconstruct_result.secret, 1234.into());
+        }
     }
 
     #[test]
