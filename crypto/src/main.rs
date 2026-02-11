@@ -168,6 +168,9 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         if c.iter().any(|x| x < &BigInt::ZERO || x >= &params.prime) {
             return Err("coefficient values must be in [0, p)".into());
         }
+        if c[c.len() - 1] == BigInt::ZERO {
+            return Err("the coefficient a_{k-1} must be > 0".into());
+        }
     }
 
     // random generate coefficients
@@ -182,10 +185,14 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         None => {
             let mut rng = rand::thread_rng();
 
-            for _ in 0..(params.threshold - 1) {
+            for _ in 0..(params.threshold - 2) {
                 let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime);
                 coefficients.push(a);
             }
+
+            // ensure coefficient a_{k-1} > 0
+            let one: BigInt = 1.into();
+            coefficients.push(rng.gen_bigint_range(&one, &params.prime));
         }
     }
 
@@ -407,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fewer_than_k() {
+    fn test_fewer_than_k_should_not_build_secret() {
         let test_cases: Vec<(usize, usize, usize, Option<Vec<BigInt>>)> = vec![
             (5, 3, 2, Some(vec![166.into(), 94.into()])),
             (5, 5, 4, None),
@@ -434,24 +441,54 @@ mod tests {
     }
 
     #[test]
-    fn test_random_coefficients() {
-        let prime = BigInt::from_str(PRIME_25519_STR).unwrap();
-        let generate_result = generate_share(GenerateShareParams {
-            secret: 1234.into(),
-            shares: 5,
-            threshold: 3,
-            prime: prime.clone(),
-            coefficients: None,
-        })
-        .unwrap();
-
-        for val in subsets(&generate_result.shares, 3) {
-            let reconstruct_result = reconstruct(ReconstructParams {
-                shares: val,
-                prime: prime.clone(),
+    fn test_greater_than_k_should_build_secret() {
+        let test_cases: Vec<(usize, usize, usize, Option<Vec<BigInt>>)> = vec![
+            (5, 3, 2, Some(vec![166.into(), 94.into()])),
+            (5, 4, 4, None),
+            (5, 2, 1, None),
+        ];
+        for t in test_cases {
+            let generate_result = generate_share(GenerateShareParams {
+                secret: 1234.into(),
+                shares: t.0,
+                threshold: t.1,
+                prime: 1613.into(),
+                coefficients: t.3,
             })
             .unwrap();
-            assert_eq!(reconstruct_result.secret, 1234.into());
+            for val in subsets(&generate_result.shares, t.2 + 1) {
+                let reconstruct_result = reconstruct(ReconstructParams {
+                    shares: val,
+                    prime: 1613.into(),
+                })
+                .unwrap();
+                assert!(reconstruct_result.secret == 1234.into());
+            }
+        }
+    }
+
+    #[test]
+    fn test_random_coefficients() {
+        let prime = BigInt::from_str(PRIME_25519_STR).unwrap();
+        let test_cases: Vec<usize> = vec![2, 3, 4, 5];
+        for t in test_cases {
+            let generate_result = generate_share(GenerateShareParams {
+                secret: 1234.into(),
+                shares: 5,
+                threshold: t,
+                prime: prime.clone(),
+                coefficients: None,
+            })
+            .unwrap();
+
+            for val in subsets(&generate_result.shares, t) {
+                let reconstruct_result = reconstruct(ReconstructParams {
+                    shares: val,
+                    prime: prime.clone(),
+                })
+                .unwrap();
+                assert_eq!(reconstruct_result.secret, 1234.into());
+            }
         }
     }
 
@@ -577,9 +614,8 @@ mod tests {
     fn test_coefficients_user_provided() {
         let test_cases: Vec<(bool, usize, Vec<BigInt>)> = vec![
             // pass cases
-            (true, 2, vec![0.into()]),
             (true, 2, vec![1.into()]),
-            (true, 3, vec![0.into(), 0.into()]),
+            (true, 3, vec![0.into(), 2.into()]),
             (true, 3, vec![1.into(), 2.into()]),
             // fail cases: value must be [0, p)
             (false, 2, vec![(-1_isize).into()]),
@@ -590,6 +626,9 @@ mod tests {
             (false, 2, vec![1.into(), 2.into()]),
             (false, 3, vec![1.into()]),
             (false, 3, vec![1.into(), 2.into(), 3.into()]),
+            // fail cases: a_{k-1} = 0
+            (false, 2, vec![0.into()]),
+            (false, 3, vec![1.into(), 0.into()]),
         ];
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
