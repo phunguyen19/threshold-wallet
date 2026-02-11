@@ -613,7 +613,7 @@ mod tests {
                         "expected test case {:?} to be pass",
                         test_case
                     );
-                    for val in subsets(&generate_result.unwrap().shares, test_case.1.clone()) {
+                    for val in subsets(&generate_result.unwrap().shares, test_case.1) {
                         let reconstruct_result = reconstruct(ReconstructParams {
                             shares: val,
                             prime: 1613.into(),
