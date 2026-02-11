@@ -407,15 +407,19 @@ mod tests {
     }
 
     #[test]
-    fn test_fewr_than_k() {
-        let test_cases: Vec<(usize, usize, usize)> = vec![(5, 3, 2), (5, 5, 4), (5, 2, 1)];
+    fn test_fewer_than_k() {
+        let test_cases: Vec<(usize, usize, usize, Option<Vec<BigInt>>)> = vec![
+            (5, 3, 2, Some(vec![166.into(), 94.into()])),
+            (5, 5, 4, None),
+            (5, 2, 1, None),
+        ];
         for t in test_cases {
             let generate_result = generate_share(GenerateShareParams {
                 secret: 1234.into(),
                 shares: t.0,
                 threshold: t.1,
                 prime: 1613.into(),
-                coefficients: None,
+                coefficients: t.3,
             })
             .unwrap();
             for val in subsets(&generate_result.shares, t.2) {
@@ -590,7 +594,7 @@ mod tests {
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
                 secret: 1234.into(),
-                threshold: test_case.1.clone(),
+                threshold: test_case.1,
                 shares: test_case.1.clone(),
                 prime: 1613.into(),
                 coefficients: Some(test_case.2.clone()),
