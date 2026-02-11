@@ -165,9 +165,7 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         if c.len() != params.threshold - 1 {
             return Err("coefficients list must be equal threshold -1".into());
         }
-        if c.iter()
-            .any(|x| x.clone() < 0.into() || x.clone() >= params.prime)
-        {
+        if c.iter().any(|x| x < &BigInt::ZERO || x >= &params.prime) {
             return Err("coefficient values must be in [0, p)".into());
         }
     }
@@ -221,7 +219,6 @@ struct ReconstructParams {
     prime: BigInt,
 }
 
-//     return (modulus, l_vec, sec);
 struct ReconstructResult {
     secret: BigInt,
     prime: BigInt,
@@ -410,6 +407,29 @@ mod tests {
     }
 
     #[test]
+    fn test_fewr_than_k() {
+        let test_cases: Vec<(usize, usize, usize)> = vec![(5, 3, 2), (5, 5, 4), (5, 2, 1)];
+        for t in test_cases {
+            let generate_result = generate_share(GenerateShareParams {
+                secret: 1234.into(),
+                shares: t.0,
+                threshold: t.1,
+                prime: 1613.into(),
+                coefficients: None,
+            })
+            .unwrap();
+            for val in subsets(&generate_result.shares, t.2) {
+                let reconstruct_result = reconstruct(ReconstructParams {
+                    shares: val,
+                    prime: 1613.into(),
+                })
+                .unwrap();
+                assert!(reconstruct_result.secret != 1234.into());
+            }
+        }
+    }
+
+    #[test]
     fn test_random_coefficients() {
         let prime = BigInt::from_str(PRIME_25519_STR).unwrap();
         let generate_result = generate_share(GenerateShareParams {
@@ -518,8 +538,8 @@ mod tests {
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
                 secret: 1234.into(),
-                threshold: test_case.1.clone(),
-                shares: test_case.2.clone(),
+                threshold: test_case.1,
+                shares: test_case.2,
                 prime: 1613.into(),
                 coefficients: None,
             });
