@@ -365,6 +365,7 @@ mod tests {
             coefficients: Some(vec![166.into(), 94.into()]),
         })
         .unwrap();
+
         assert_eq!(
             generate_result.shares,
             [
@@ -375,6 +376,7 @@ mod tests {
                 (5.into(), 1188.into())
             ]
         );
+
         for val in subsets(&generate_result.shares, 3) {
             let reconstruct_result = reconstruct(ReconstructParams {
                 shares: val,
@@ -396,16 +398,15 @@ mod tests {
             coefficients: Some(vec![166.into(), 94.into()]),
         })
         .unwrap();
-        let reconstruct_result = reconstruct(ReconstructParams {
-            shares: vec![
-                generate_result.shares[0].clone(),
-                generate_result.shares[2].clone(),
-                generate_result.shares[4].clone(),
-            ],
-            prime,
-        })
-        .unwrap();
-        assert_eq!(reconstruct_result.secret, 1234.into());
+
+        for val in subsets(&generate_result.shares, 3) {
+            let reconstruct_result = reconstruct(ReconstructParams {
+                shares: val,
+                prime: prime.clone(),
+            })
+            .unwrap();
+            assert_eq!(reconstruct_result.secret, 1234.into());
+        }
     }
 
     #[test]
@@ -419,16 +420,15 @@ mod tests {
             coefficients: None,
         })
         .unwrap();
-        let reconstruct_result = reconstruct(ReconstructParams {
-            shares: vec![
-                generate_result.shares[0].clone(),
-                generate_result.shares[2].clone(),
-                generate_result.shares[4].clone(),
-            ],
-            prime,
-        })
-        .unwrap();
-        assert_eq!(reconstruct_result.secret, 1234.into());
+
+        for val in subsets(&generate_result.shares, 3) {
+            let reconstruct_result = reconstruct(ReconstructParams {
+                shares: val,
+                prime: prime.clone(),
+            })
+            .unwrap();
+            assert_eq!(reconstruct_result.secret, 1234.into());
+        }
     }
 
     #[test]
@@ -455,12 +455,15 @@ mod tests {
                 coefficients: None,
             })
             .unwrap();
-            let reconstruct_result = reconstruct(ReconstructParams {
-                shares: generate_result.shares,
-                prime,
-            })
-            .unwrap();
-            assert_eq!(reconstruct_result.secret, secret);
+
+            for val in subsets(&generate_result.shares, 2) {
+                let reconstruct_result = reconstruct(ReconstructParams {
+                    shares: val,
+                    prime: prime.clone(),
+                })
+                .unwrap();
+                assert_eq!(reconstruct_result.secret, secret);
+            }
         }
     }
 
@@ -533,11 +536,13 @@ mod tests {
                         "expected test case {:?} to be pass",
                         test_case
                     );
-                    let reconstruct_result = reconstruct(ReconstructParams {
-                        shares: generate_result.unwrap().shares,
-                        prime: 1613.into(),
-                    });
-                    assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                    for val in subsets(&generate_result.unwrap().shares, test_case.1) {
+                        let reconstruct_result = reconstruct(ReconstructParams {
+                            shares: val,
+                            prime: 1613.into(),
+                        });
+                        assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                    }
                 }
             }
         }
@@ -583,11 +588,13 @@ mod tests {
                         "expected test case {:?} to be pass",
                         test_case
                     );
-                    let reconstruct_result = reconstruct(ReconstructParams {
-                        shares: generate_result.unwrap().shares,
-                        prime: 1613.into(),
-                    });
-                    assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                    for val in subsets(&generate_result.unwrap().shares, test_case.1.clone()) {
+                        let reconstruct_result = reconstruct(ReconstructParams {
+                            shares: val,
+                            prime: 1613.into(),
+                        });
+                        assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                    }
                 }
             }
         }
