@@ -185,7 +185,7 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
             let mut rng = rand::thread_rng();
 
             for _ in 0..(params.threshold - 1) {
-                let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime.clone());
+                let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime);
                 coefficients.push(a);
             }
         }
@@ -203,8 +203,8 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
 
     // Calculate shares
     let mut shares: Vec<(BigInt, BigInt)> = Vec::new();
-    while shares.len() < params.shares {
-        let index = shares.len() + 1;
+    for i in 0..params.shares {
+        let index = i + 1;
         let val = polynomial_func(index.into());
         shares.push((index.into(), val));
     }
@@ -487,11 +487,12 @@ mod tests {
             ),
         ];
         for test_case in test_cases {
+            let t = test_case.clone();
             let generate_result = generate_share(GenerateShareParams {
-                secret: test_case.0.clone(),
+                secret: t.0,
                 shares: 2,
                 threshold: 2,
-                prime: test_case.1.clone(),
+                prime: t.1,
                 coefficients: None,
             });
             assert!(
