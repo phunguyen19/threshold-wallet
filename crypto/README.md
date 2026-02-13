@@ -52,15 +52,15 @@ This CLI tool apply the Lagrange interpolating polynomial to calculate shares an
 Basically, we use this formula to find the secret:
 
 ```
-(D = Σ yᵢ × Lᵢ(0) mod p)
+D = Σ yᵢ × Lᵢ(0) mod p
 ```
 
 with:
 
 - `p` is the prime value we will perform mod operation to prevent value information leakage.
-- `i` and `y` is the order number and the value of share. E.g: the 3rd share value is 1598 then `i = 3, y = 1598`;
+- xᵢ is the x-coordinate and yᵢ is the value of the i-th share.. E.g: the 3rd share value is 1598 then `i = 3, y = 1598`;
 
-We also use this formular to verify if the L values are correct?
+We also use this formular to verify if the L values are correct:
 
 ```
 Σ Lᵢ(0) = 1
@@ -75,6 +75,28 @@ The default prime value is 2^255 - 19 (Curve25519) which is chosen because it's 
 ### Why Modular Arithmetic
 
 We use modular arithmetic as a best practice to prevent value information leakage. Without modular arithmetic, the larger value of shares give hint that the large coefficient. The mod operation ensure the information theory-security and the k-1 shares reveal zero information about the secret.
+
+### Why k-1 shares cannot reconstruct the secrets are shared by k threshold
+
+We use this Lagrange formula to recalculate the secret
+
+```
+D = Σ yᵢ × Lᵢ(0) mod p
+
+with i run from 0 to k
+```
+
+If users provide only `k-1` shares and missing the `k` share, then the formula above become:
+
+```
+D = Σ(yᵢ × Lᵢ(0)) + yk × Lk(0) mod p
+
+with i run from 0 to k-1
+```
+
+Because the `k` share is not provided, then `yk x Lk(0)` is unknown and there is p possible of values of `yk x Lk(0)` to check to construct the `D`
+
+This is called **information-theoretic security** — it's not just computationally hard to find the secret, it's mathematically impossible. Every guess is equally valid.
 
 ### The Test Params
 
@@ -93,25 +115,29 @@ D₅ = q(5) = 1234 + 166(5) + 94(5)² = 4414 mod 1613 = 1188
 We apply Lagrange basic polynomial functions to reconstruct the secret:
 
 ```
-q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x) (mod 1613)
+q(x) = y₁ × L₁(x) + y₃ × L₃(x) + y₅ × L₅(x) (mod 1613)
 
-L₁(0) = [(0 - x₂) / (x₁ - x₂)] × [(0 - x₃) / (x₁ - x₃)]
+L₁(0) = [(0 - x₃) / (x₁ - x₃)] × [(0 - x₅) / (x₁ - x₅)]
       = [(0 - 3) / (1 - 3)] × [(0 - 5) / (1 - 5)]
-      = 3 × 2⁻¹ × 5 × 4⁻¹ ≡ 1010 (mod 1613)
+      = (-3/-2) × (-5/-4)
+      = 3 × 2⁻¹ × 5 × 4⁻¹
+      = 15 × 8⁻¹ ≡ 1010 (mod 1613)
 
-L₂(0) = [(0 - x₁) / (x₂ - x₁)] × [(0 - x₃) / (x₂ - x₃)]
+L₃(0) = [(0 - x₁) / (x₃ - x₁)] × [(0 - x₅) / (x₃ - x₅)]
       = [(0 - 1) / (3 - 1)] × [(0 - 5) / (3 - 5)]
+      = (-1/2) × (-5/-2)
       = -5 × 4⁻¹ ≡ 402 (mod 1613)
 
-L₃(0) = [(0 - x₁) / (x₃ - x₁)] × [(0 - x₂) / (x₃ - x₂)]
+L₅(0) = [(0 - x₁) / (x₅ - x₁)] × [(0 - x₃) / (x₅ - x₃)]
       = [(0 - 1) / (5 - 1)] × [(0 - 3) / (5 - 3)]
+      = (-1/4) × (-3/2)
       = 3 × 8⁻¹ ≡ 202 (mod 1613)
 ```
 
 Verify
 
 ```
-L₁(0) + L₂(0) + L₃(0) ≡ ? (mod 1613)
+L₁(0) + L₃(0) + L₅(0) ≡ ? (mod 1613)
 1010 + 402 + 202 = 1614
 1614 mod 1613 = 1 ✅
 ```
@@ -119,7 +145,7 @@ L₁(0) + L₂(0) + L₃(0) ≡ ? (mod 1613)
 Reconstruct
 
 ```
-q(0) ≡ y₁ × L₁(0) + y₂ × L₂(0) + y₃ × L₃(0) (mod 1613)
+q(0) ≡ y₁ × L₁(0) + y₃ × L₃(0) + y₅ × L₅(0) (mod 1613)
 q(0) ≡ 1494 × 1010 + 965 × 402 + 1188 × 202 (mod 1613)
 q(0) = D = 1234
 ```
