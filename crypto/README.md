@@ -20,7 +20,7 @@ The `shamir` CLI provides Shamir's Secret Sharing operations:
 cargo run -- generate --secret 1234 --shares 5 --threshold 3
 
 # Reconstruct secret from shares
-cargo run -- reconstruct --shares "1:abc123" --shares "3:def456" --shares "5:789abc"
+cargo run -- reconstruct --shares "1:123" --shares "3:456" --shares "5:789"
 
 # Enable verbose output
 cargo run -- --verbose generate --secret 1234 --shares 5 --threshold 3
@@ -35,15 +35,11 @@ This is a Rust CLI application implementing Shamir's Secret Sharing scheme for t
 
 The default prime is the Curve25519 prime (2^255 - 19), defined in `default_prime()`.
 
-### Current State
-
-The CLI interface is scaffolded with `Generate` and `Reconstruct` commands. The cryptographic operations (polynomial generation, share creation, Lagrange interpolation) are not yet implemented - the output is currently hardcoded placeholder text.
-
 ## Knowledge Base
 
 ### The Paper
 
-This CLI is build based on the paper "How to Share a Secret" by Shamir in 1979.
+This CLI is built based on the paper "How to Share a Secret" by Shamir in 1979.
 
 One of the source file can be found here: https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareASecret.pdf
 
@@ -51,18 +47,81 @@ There is an explaination by Wikipedia including its weakness, examples and code 
 
 ### The Polynomial
 
-This CLI tool apply the Lagrange interpolating polynomial to calculate shares and reconstruct the secret due to it simple and easy to implement for demonstrate the secret sharing algorithm.
+This CLI tool apply the Lagrange interpolating polynomial to calculate shares and reconstruct the secret due to its simple and ease of implementation for demonstrate the secret sharing algorithm.
 
-The detail of Lagrage interpolation can be found here: https://en.wikipedia.org/wiki/Lagrange_polynomial
+Basically, we use this formula to find the secret:
+
+```
+(D = Σ yᵢ × Lᵢ(0) mod p)
+```
+
+with:
+
+- `p` is the prime value we will perform mod operation to prevent value information leakage.
+- `i` and `y` is the order number and the value of share. E.g: the 3rd share value is 1598 then `i = 3, y = 1598`;
+
+We also use this formular to verify if the L values are correct?
+
+```
+Σ Lᵢ(0) = 1
+```
+
+The detail of Lagrange interpolation can be found here: https://en.wikipedia.org/wiki/Lagrange_polynomial.
 
 ### The Default Prime
 
-The default prime value is 2^255 - 19 (Curve25519) which is chosen as it's popular among the cryptographic domain due to balance between security and performance for calculating.
+The default prime value is 2^255 - 19 (Curve25519) which is chosen because it's large enough to serve a real cryptographic field (255-bit) and it will be reused in later implementation for FROST and supporting multiple curves.
 
-### Why Modulus
+### Why Modular Arithmetic
 
-We use arithmetic modulus as a best practice to keep the values precise, in range and prevent leakage values information.
+We use modular arithmetic as a best practice to prevent value information leakage. Without modular arithmetic, the larger value of shares give hint that the large coefficient. The mod operation ensure the information theory-security and the k-1 shares reveal zero information about the secret.
 
 ### The Test Params
 
 We use the polynomial `q(x) = 1234 + 166x + 94x²  (mod 1613)` for testing.
+
+We can easily calculate the shares from that. We use basic 5 shares:
+
+```
+D₁ = q(1) = 1234 + 166(1) + 94(1)² = 1494 mod 1613 = 1494
+D₂ = q(2) = 1234 + 166(2) + 94(2)² = 1942 mod 1613 = 329
+D₃ = q(3) = 1234 + 166(3) + 94(3)² = 2578 mod 1613 = 965
+D₄ = q(4) = 1234 + 166(4) + 94(4)² = 3402 mod 1613 = 176
+D₅ = q(5) = 1234 + 166(5) + 94(5)² = 4414 mod 1613 = 1188
+```
+
+We apply Lagrange basic polynomial functions to reconstruct the secret:
+
+```
+q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x) (mod 1613)
+
+L₁(0) = [(0 - x₂) / (x₁ - x₂)] × [(0 - x₃) / (x₁ - x₃)]
+      = [(0 - 3) / (1 - 3)] × [(0 - 5) / (1 - 5)]
+      = 3 × 2⁻¹ × 5 × 4⁻¹ ≡ 1010 (mod 1613)
+
+L₂(0) = [(0 - x₁) / (x₂ - x₁)] × [(0 - x₃) / (x₂ - x₃)]
+      = [(0 - 1) / (3 - 1)] × [(0 - 5) / (3 - 5)]
+      = -5 × 4⁻¹ ≡ 402 (mod 1613)
+
+L₃(0) = [(0 - x₁) / (x₃ - x₁)] × [(0 - x₂) / (x₃ - x₂)]
+      = [(0 - 1) / (5 - 1)] × [(0 - 3) / (5 - 3)]
+      = 3 × 8⁻¹ ≡ 202 (mod 1613)
+```
+
+Verify
+
+```
+L₁(0) + L₂(0) + L₃(0) ≡ ? (mod 1613)
+1010 + 402 + 202 = 1614
+1614 mod 1613 = 1 ✅
+```
+
+Reconstruct
+
+```
+q(0) ≡ y₁ × L₁(0) + y₂ × L₂(0) + y₃ × L₃(0) (mod 1613)
+q(0) ≡ 1494 × 1010 + 965 × 402 + 1188 × 202 (mod 1613)
+q(0) = D = 1234
+```
+
+> NOTE: the calculation is skip the detail of mod operation as it's pure math and well defined ithe libraries we used.

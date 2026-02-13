@@ -286,7 +286,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
 
 fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
     let mut share_point: (BigInt, BigInt) = (0.into(), 0.into());
-    let s: Vec<&str> = val.split(",").collect();
+    let s: Vec<&str> = val.split(":").collect();
     if s.len() != 2 {
         return Err(format!("cannot parse share param: {:?}", val));
     }
