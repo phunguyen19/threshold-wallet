@@ -33,7 +33,7 @@ This is a Rust CLI application implementing Shamir's Secret Sharing scheme for t
 - **clap**: CLI argument parsing with derive macros
 - **num-bigint**: Arbitrary precision arithmetic for cryptographic operations over large finite fields
 
-The default prime is the Curve25519 prime (2^255 - 19), defined in `default_prime()`.
+The default prime is the Curve25519 prime (2^255 - 19).
 
 ## Knowledge Base
 
@@ -41,13 +41,13 @@ The default prime is the Curve25519 prime (2^255 - 19), defined in `default_prim
 
 This CLI is built based on the paper "How to Share a Secret" by Shamir in 1979.
 
-One of the source file can be found here: https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareASecret.pdf
+The source paper can be found here: https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareASecret.pdf
 
 There is an explanation by Wikipedia including its weakness, examples and code snippet: https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
 
 ### The Polynomial
 
-This CLI tool applies the Lagrange interpolating polynomial to calculate shares and reconstruct the secret due to its simplicity and ease of implementation for demonstrate the secret sharing algorithm.
+This CLI tool applies the Lagrange interpolating polynomial to calculate shares and reconstruct the secret due to its simplicity and ease of implementation for demonstrating the secret sharing algorithm.
 
 Basically, we use this formula to find the secret:
 
@@ -78,25 +78,19 @@ We use modular arithmetic as a best practice to prevent value information leakag
 
 ### Why k-1 shares cannot reconstruct a k-threshold secret
 
-We use this Lagrange formula to recalculate the secret
+We use this Lagrange formula to recalculate the secret:
 
 ```
 D = Σ yᵢ × Lᵢ(0) mod p
 
-with i run all over k shares
+where the sum is over all k shares
 ```
 
-If users provide only `k-1` shares and missing the `k` share, then the formula above become:
+If users provide only k-1 shares and are missing the k-th share, the formula cannot produce the correct secret. This is because each Lᵢ(0) value depends on the x-coordinates of all k shares in the set — so the missing share doesn't just remove one term, it changes every term in the formula.
 
-```
-D = Σ(yᵢ × Lᵢ(0)) + y_j × L_j(0) mod p
+For every possible secret value s in [0, p), there exists a valid k-th share that would make the reconstruction produce s. So there are p possible secrets and no way to know which one is correct.
 
-with i run all over k-1 shares and y_j and L_j(0) is an unknown values computed from k-share
-```
-
-Because the `k` share is not provided, then `y_j x L_j(0)` is unknown and there is p possible of values of `y_j x L_j(0)` to check to construct the `D`
-
-This is called **information-theoretic security** — it's not just computationally hard to find the secret, it's mathematically impossible. Every guess is equally valid.
+This is called information-theoretic security — it's not just computationally hard to find the secret, it's mathematically impossible. Every guess is equally valid.
 
 ### The Test Params
 
