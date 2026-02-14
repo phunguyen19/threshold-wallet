@@ -43,11 +43,11 @@ This CLI is built based on the paper "How to Share a Secret" by Shamir in 1979.
 
 One of the source file can be found here: https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareASecret.pdf
 
-There is an explaination by Wikipedia including its weakness, examples and code snippet: https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
+There is an explanation by Wikipedia including its weakness, examples and code snippet: https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
 
 ### The Polynomial
 
-This CLI tool apply the Lagrange interpolating polynomial to calculate shares and reconstruct the secret due to its simple and ease of implementation for demonstrate the secret sharing algorithm.
+This CLI tool applies the Lagrange interpolating polynomial to calculate shares and reconstruct the secret due to its simplicity and ease of implementation for demonstrate the secret sharing algorithm.
 
 Basically, we use this formula to find the secret:
 
@@ -58,9 +58,9 @@ D = Σ yᵢ × Lᵢ(0) mod p
 with:
 
 - `p` is the prime value we will perform mod operation to prevent value information leakage.
-- xᵢ is the x-coordinate and yᵢ is the value of the i-th share.. E.g: the 3rd share value is 1598 then `i = 3, y = 1598`;
+- xᵢ is the x-coordinate and yᵢ is the value of the i-th share. E.g: the 3rd share value is 1598 then `i = 3, y = 1598`;
 
-We also use this formular to verify if the L values are correct:
+We also use this formula to verify if the L values are correct:
 
 ```
 Σ Lᵢ(0) = 1
@@ -74,27 +74,27 @@ The default prime value is 2^255 - 19 (Curve25519) which is chosen because it's 
 
 ### Why Modular Arithmetic
 
-We use modular arithmetic as a best practice to prevent value information leakage. Without modular arithmetic, the larger value of shares give hint that the large coefficient. The mod operation ensure the information theory-security and the k-1 shares reveal zero information about the secret.
+We use modular arithmetic as a best practice to prevent value information leakage. Without modular arithmetic, larger share values hint at large coefficients. The mod operation ensures information-theoretic security and the k-1 shares reveal zero information about the secret.
 
-### Why k-1 shares cannot reconstruct the secrets are shared by k threshold
+### Why k-1 shares cannot reconstruct a k-threshold secret
 
 We use this Lagrange formula to recalculate the secret
 
 ```
 D = Σ yᵢ × Lᵢ(0) mod p
 
-with i run from 0 to k
+with i run all over k shares
 ```
 
 If users provide only `k-1` shares and missing the `k` share, then the formula above become:
 
 ```
-D = Σ(yᵢ × Lᵢ(0)) + yk × Lk(0) mod p
+D = Σ(yᵢ × Lᵢ(0)) + y_j × L_j(0) mod p
 
-with i run from 0 to k-1
+with i run all over k-1 shares and y_j and L_j(0) is an unknown values computed from k-share
 ```
 
-Because the `k` share is not provided, then `yk x Lk(0)` is unknown and there is p possible of values of `yk x Lk(0)` to check to construct the `D`
+Because the `k` share is not provided, then `y_j x L_j(0)` is unknown and there is p possible of values of `y_j x L_j(0)` to check to construct the `D`
 
 This is called **information-theoretic security** — it's not just computationally hard to find the secret, it's mathematically impossible. Every guess is equally valid.
 
@@ -150,4 +150,4 @@ q(0) ≡ 1494 × 1010 + 965 × 402 + 1188 × 202 (mod 1613)
 q(0) = D = 1234
 ```
 
-> NOTE: the calculation is skip the detail of mod operation as it's pure math and well defined ithe libraries we used.
+> NOTE: the calculations skip the detail of mod operation as it's pure math and well-defined in the libraries we used.
