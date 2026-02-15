@@ -1,7 +1,7 @@
-use std::str::FromStr;
+use std::{ops::Neg, str::FromStr};
 
 use clap::{Parser, Subcommand, ValueEnum};
-use num_bigint::{BigInt, RandBigInt};
+use num_bigint::{BigUint, RandBigInt};
 
 // Curve25519 prime: 2^255 - 19
 const PRIME_25519_STR: &str =
@@ -32,8 +32,8 @@ enum Commands {
     /// Generate shares for a secret
     Generate {
         /// The secret need to be generated shares
-        #[arg(long, value_parser = BigInt::from_str)]
-        secret: BigInt,
+        #[arg(long, value_parser = BigUint::from_str)]
+        secret: BigUint,
 
         /// How many shares
         #[arg(long)]
@@ -44,21 +44,21 @@ enum Commands {
         threshold: usize,
 
         /// Optional prime value
-        #[arg(long, value_parser = BigInt::from_str, default_value = PRIME_25519_STR)]
-        prime: BigInt,
+        #[arg(long, value_parser = BigUint::from_str, default_value = PRIME_25519_STR)]
+        prime: BigUint,
 
         /// Optional coefficients
-        #[arg(long, value_delimiter = ',', value_parser = BigInt::from_str)]
-        coefficients: Option<Vec<BigInt>>,
+        #[arg(long, value_delimiter = ',', value_parser = BigUint::from_str)]
+        coefficients: Option<Vec<BigUint>>,
     },
     Reconstruct {
         // List of shares for reconstruct the secret
         #[arg(long, short, value_parser = parse_shares_param)]
-        shares: Vec<(BigInt, BigInt)>,
+        shares: Vec<(BigUint, BigUint)>,
 
         /// Optional prime value
-        #[arg(long, short, value_parser = BigInt::from_str, default_value = PRIME_25519_STR)]
-        prime: BigInt,
+        #[arg(long, short, value_parser = BigUint::from_str, default_value = PRIME_25519_STR)]
+        prime: BigUint,
     },
 }
 
@@ -141,21 +141,21 @@ fn main() -> Result<(), String> {
 }
 
 struct GenerateShareParams {
-    secret: BigInt,
+    secret: BigUint,
     shares: usize,
     threshold: usize,
-    prime: BigInt,
-    coefficients: Option<Vec<BigInt>>,
+    prime: BigUint,
+    coefficients: Option<Vec<BigUint>>,
 }
 
 struct GenerateSharesResult {
-    shares: Vec<(BigInt, BigInt)>,
-    coefficients: Vec<BigInt>,
-    prime: BigInt,
+    shares: Vec<(BigUint, BigUint)>,
+    coefficients: Vec<BigUint>,
+    prime: BigUint,
 }
 
 fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
-    if params.secret < 0.into() || params.secret >= params.prime {
+    if params.secret >= params.prime {
         return Err("invalid secret or prime values. It must be 0 <= secret < prime".into());
     }
     if params.threshold < 2 || params.threshold > params.shares {
@@ -165,16 +165,16 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         if c.len() != params.threshold - 1 {
             return Err("coefficients list must be equal threshold -1".into());
         }
-        if c.iter().any(|x| x < &BigInt::ZERO || x >= &params.prime) {
+        if c.iter().any(|x| x >= &params.prime) {
             return Err("coefficient values must be in [0, p)".into());
         }
-        if c[c.len() - 1] == BigInt::ZERO {
+        if c[c.len() - 1] == BigUint::ZERO {
             return Err("the coefficient a_{k-1} must be > 0".into());
         }
     }
 
     // random generate coefficients
-    let mut coefficients: Vec<BigInt> = Vec::new();
+    let mut coefficients: Vec<BigUint> = Vec::new();
 
     match params.coefficients {
         Some(arg_vals) => {
@@ -186,28 +186,28 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
             let mut rng = rand::thread_rng();
 
             for _ in 0..(params.threshold - 2) {
-                let a = rng.gen_bigint_range(&BigInt::ZERO, &params.prime);
+                let a = rng.gen_biguint_range(&BigUint::ZERO, &params.prime);
                 coefficients.push(a);
             }
 
             // ensure coefficient a_{k-1} > 0
-            let one: BigInt = 1.into();
-            coefficients.push(rng.gen_bigint_range(&one, &params.prime));
+            let one: BigUint = 1u32.into();
+            coefficients.push(rng.gen_biguint_range(&one, &params.prime));
         }
     }
 
     // The polynomial function
-    let polynomial_func = |x: BigInt| -> BigInt {
-        let mut ret: BigInt = 0_u64.into();
+    let polynomial_func = |x: BigUint| -> BigUint {
+        let mut ret: BigUint = 0_u64.into();
         for (i, value) in coefficients.iter().enumerate() {
             let degree = (i as u32) + 1_u32;
-            ret += posrem(value * x.pow(degree), params.prime.clone());
+            ret += value * x.pow(degree) % &params.prime;
         }
-        posrem(ret + &params.secret, params.prime.clone())
+        (ret + &params.secret) % &params.prime
     };
 
     // Calculate shares
-    let mut shares: Vec<(BigInt, BigInt)> = Vec::new();
+    let mut shares: Vec<(BigUint, BigUint)> = Vec::new();
     for i in 0..params.shares {
         let index = i + 1;
         let val = polynomial_func(index.into());
@@ -222,43 +222,55 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
 }
 
 struct ReconstructParams {
-    shares: Vec<(BigInt, BigInt)>,
-    prime: BigInt,
+    shares: Vec<(BigUint, BigUint)>,
+    prime: BigUint,
 }
 
 struct ReconstructResult {
-    secret: BigInt,
-    prime: BigInt,
-    basis_l_vals: Vec<BigInt>,
+    secret: BigUint,
+    prime: BigUint,
+    basis_l_vals: Vec<BigUint>,
 }
 
 fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
+    for (i, el_i) in params.shares.iter().enumerate() {
+        for (j, el_j) in params.shares.iter().enumerate() {
+            if i != j && el_i.0 == el_j.0 {
+                return Err(format!(
+                    "shares must be unique, found duplicate x-coordinates: {:?}",
+                    el_i.0
+                ));
+            }
+        }
+    }
+
     // For each key point:
     // Calculate: Li(0) mod p
     // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
-    let mut l_vec: Vec<(BigInt, BigInt, BigInt)> = Vec::new();
+    let mut l_vec: Vec<BigUint> = Vec::new();
 
     // L1 + L2 + L3 = 1 mod p
-    let mut verify: BigInt = 0.into();
+    let mut verify: BigUint = 0u32.into();
 
     // Compute q(0) = D mod p
     // q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x)
-    let mut sec: BigInt = 0.into();
+    let mut sec: BigUint = 0u32.into();
 
     for val in &params.shares {
-        let mut numerator: BigInt = 1_usize.into();
-        let mut denominator: BigInt = 1_usize.into();
+        let mut numerator: BigUint = 1_usize.into();
+        let mut denominator: BigUint = 1_usize.into();
         for val2 in &params.shares {
             if val2.0 == val.0 {
                 continue;
             }
-            numerator *= -&val2.0;
-            denominator *= &val.0 - &val2.0;
-        }
 
-        if denominator < 0.into() {
-            numerator = -numerator;
-            denominator = -denominator;
+            if &val.0 < &val2.0 {
+                denominator *= &val2.0 - &val.0;
+                numerator *= &val2.0 % &params.prime;
+            } else {
+                denominator *= &val.0 - &val2.0;
+                numerator *= &params.prime - &val2.0;
+            }
         }
 
         let denominator_inv_mod = match denominator.modinv(&params.prime) {
@@ -266,32 +278,34 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
             None => return Err(format!("cannot calculate inverse mod for share={:?}", val)),
         };
 
-        let l = posrem(numerator * denominator_inv_mod, params.prime.clone());
+        let numerator_mod = numerator % &params.prime;
+
+        let l = (numerator_mod * denominator_inv_mod) % &params.prime;
         verify += &l;
-        sec = posrem(sec + (&val.1 * &l), params.prime.clone());
-        l_vec.push((val.0.clone(), val.1.clone(), l));
+        sec = (sec + (&val.1 * &l)) % &params.prime;
+        l_vec.push(l);
     }
 
     // Verify: Sum(Li) = 1 mod p
-    if posrem(verify, params.prime.clone()) != 1.into() {
+    if verify % &params.prime != 1_usize.into() {
         return Err("shares are not in the same polynomial".into());
     }
 
     Ok(ReconstructResult {
         secret: sec,
-        prime: params.prime,
-        basis_l_vals: l_vec.iter().map(|x| x.2.clone()).collect(),
+        prime: params.prime.clone(),
+        basis_l_vals: l_vec.iter().map(|x| x.clone() % &params.prime).collect(),
     })
 }
 
-fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
-    let mut share_point: (BigInt, BigInt) = (0.into(), 0.into());
+fn parse_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
+    let mut share_point: (BigUint, BigUint) = (0_usize.into(), 0_usize.into());
     let s: Vec<&str> = val.split(":").collect();
     if s.len() != 2 {
         return Err(format!("cannot parse share param: {:?}", val));
     }
 
-    match BigInt::from_str(s[0]) {
+    match BigUint::from_str(s[0]) {
         Ok(x) => share_point.0 = x,
         Err(e) => {
             return Err(format!(
@@ -301,7 +315,7 @@ fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
         }
     };
 
-    match BigInt::from_str(s[1]) {
+    match BigUint::from_str(s[1]) {
         Ok(y) => share_point.1 = y,
         Err(e) => {
             return Err(format!(
@@ -314,18 +328,10 @@ fn parse_shares_param(val: &str) -> Result<(BigInt, BigInt), String> {
     Ok(share_point)
 }
 
-fn posrem(a: BigInt, b: BigInt) -> BigInt {
-    if a < 0.into() {
-        (&b - ((-a) % &b)) % &b
-    } else {
-        a % &b
-    }
-}
-
-fn new_num_format(m: &NumMod) -> Box<dyn Fn(&BigInt) -> String> {
+fn new_num_format(m: &NumMod) -> Box<dyn Fn(&BigUint) -> String> {
     match m {
-        NumMod::Hex => Box::new(move |n: &BigInt| format!("{:#x}", n)),
-        NumMod::Dec => Box::new(move |n: &BigInt| format!("{}", n)),
+        NumMod::Hex => Box::new(move |n: &BigUint| format!("{:#x}", n)),
+        NumMod::Dec => Box::new(move |n: &BigUint| format!("{}", n)),
     }
 }
 
@@ -362,44 +368,44 @@ mod tests {
     #[test]
     fn test_full_flow_preset() {
         let generate_result = generate_share(GenerateShareParams {
-            secret: 1234.into(),
+            secret: 1234u32.into(),
             shares: 5,
             threshold: 3,
-            prime: 1613.into(),
-            coefficients: Some(vec![166.into(), 94.into()]),
+            prime: 1613u32.into(),
+            coefficients: Some(vec![166u32.into(), 94u32.into()]),
         })
         .unwrap();
-
-        assert_eq!(
-            generate_result.shares,
-            [
-                (1.into(), 1494.into()),
-                (2.into(), 329.into()),
-                (3.into(), 965.into()),
-                (4.into(), 176.into()),
-                (5.into(), 1188.into())
-            ]
-        );
 
         for val in subsets(&generate_result.shares, 3) {
             let reconstruct_result = reconstruct(ReconstructParams {
                 shares: val,
-                prime: 1613.into(),
+                prime: 1613u32.into(),
             })
             .unwrap();
-            assert_eq!(reconstruct_result.secret, 1234.into());
+            assert_eq!(reconstruct_result.secret, 1234u32.into());
         }
+
+        assert_eq!(
+            generate_result.shares,
+            [
+                (1u32.into(), 1494u32.into()),
+                (2u32.into(), 329u32.into()),
+                (3u32.into(), 965u32.into()),
+                (4u32.into(), 176u32.into()),
+                (5u32.into(), 1188u32.into())
+            ]
+        );
     }
 
     #[test]
     fn test_full_flow_prime_25519() {
-        let prime = BigInt::from_str(PRIME_25519_STR).unwrap();
+        let prime = BigUint::from_str(PRIME_25519_STR).unwrap();
         let generate_result = generate_share(GenerateShareParams {
-            secret: 1234.into(),
+            secret: 1234u32.into(),
             shares: 5,
             threshold: 3,
             prime: prime.clone(),
-            coefficients: Some(vec![166.into(), 94.into()]),
+            coefficients: Some(vec![166u32.into(), 94u32.into()]),
         })
         .unwrap();
 
@@ -409,72 +415,72 @@ mod tests {
                 prime: prime.clone(),
             })
             .unwrap();
-            assert_eq!(reconstruct_result.secret, 1234.into());
+            assert_eq!(reconstruct_result.secret, 1234u32.into());
         }
     }
 
     #[test]
     fn test_fewer_than_k_should_not_build_secret() {
-        let test_cases: Vec<(usize, usize, Option<Vec<BigInt>>)> = vec![
-            (5, 3, Some(vec![166.into(), 94.into()])),
+        let test_cases: Vec<(usize, usize, Option<Vec<BigUint>>)> = vec![
+            (5, 3, Some(vec![166u32.into(), 94u32.into()])),
             (5, 5, None),
             (5, 2, None),
         ];
         for t in test_cases {
             let generate_result = generate_share(GenerateShareParams {
-                secret: 1234.into(),
+                secret: 1234u32.into(),
                 shares: t.0,
                 threshold: t.1,
-                prime: 1613.into(),
+                prime: BigUint::from_str(PRIME_25519_STR).unwrap(),
                 coefficients: t.2,
             })
             .unwrap();
             for val in subsets(&generate_result.shares, t.1 - 1) {
                 let reconstruct_result = reconstruct(ReconstructParams {
                     shares: val,
-                    prime: 1613.into(),
+                    prime: 1613u32.into(),
                 })
                 .unwrap();
-                assert!(reconstruct_result.secret != 1234.into());
+                assert!(reconstruct_result.secret != 1234u32.into());
             }
         }
     }
 
     #[test]
     fn test_greater_than_k_should_build_secret() {
-        let test_cases: Vec<(usize, usize, Option<Vec<BigInt>>)> = vec![
+        let test_cases: Vec<(usize, usize, Option<Vec<BigUint>>)> = vec![
             (5, 2, None),
-            (5, 3, Some(vec![166.into(), 94.into()])),
+            (5, 3, Some(vec![166u32.into(), 94u32.into()])),
             (6, 4, None),
             (7, 5, None),
         ];
         for t in test_cases {
             let generate_result = generate_share(GenerateShareParams {
-                secret: 1234.into(),
+                secret: 1234u32.into(),
                 shares: t.0,
                 threshold: t.1,
-                prime: 1613.into(),
+                prime: 1613u32.into(),
                 coefficients: t.2,
             })
             .unwrap();
             for val in subsets(&generate_result.shares, t.1 + 1) {
                 let reconstruct_result = reconstruct(ReconstructParams {
                     shares: val.clone(),
-                    prime: 1613.into(),
+                    prime: 1613u32.into(),
                 })
                 .unwrap();
-                assert!(reconstruct_result.secret == 1234.into());
+                assert!(reconstruct_result.secret == 1234u32.into());
             }
         }
     }
 
     #[test]
     fn test_random_coefficients() {
-        let prime = BigInt::from_str(PRIME_25519_STR).unwrap();
+        let prime = BigUint::from_str(PRIME_25519_STR).unwrap();
         let test_cases: Vec<usize> = vec![2, 3, 4, 5];
         for t in test_cases {
             let generate_result = generate_share(GenerateShareParams {
-                secret: 1234.into(),
+                secret: 1234u32.into(),
                 shares: 5,
                 threshold: t,
                 prime: prime.clone(),
@@ -488,25 +494,21 @@ mod tests {
                     prime: prime.clone(),
                 })
                 .unwrap();
-                assert_eq!(reconstruct_result.secret, 1234.into());
+                assert_eq!(reconstruct_result.secret, 1234u32.into());
             }
         }
     }
 
     #[test]
     fn test_generate_secret_value_pass_cases() {
-        let test_cases: Vec<(BigInt, BigInt)> = vec![
-            (0.into(), 1613.into()),
-            (0.into(), BigInt::from_str(PRIME_25519_STR).unwrap()),
-            (1.into(), 1613.into()),
-            (1.into(), BigInt::from_str(PRIME_25519_STR).unwrap()),
-            (1234.into(), 1613.into()),
-            (1234.into(), BigInt::from_str(PRIME_25519_STR).unwrap()),
-            (1612.into(), 1613.into()),
-            (
-                BigInt::from_str(PRIME_25519_STR).unwrap() - 1,
-                BigInt::from_str(PRIME_25519_STR).unwrap(),
-            ),
+        let test_cases: Vec<(BigUint, BigUint)> = vec![
+            (0u32.into(), 1613u32.into()),
+            (0u32.into(), BigUint::from_str(PRIME_25519_STR).unwrap()),
+            (1u32.into(), 1613u32.into()),
+            (1u32.into(), BigUint::from_str(PRIME_25519_STR).unwrap()),
+            (1234u32.into(), 1613u32.into()),
+            (1234u32.into(), BigUint::from_str(PRIME_25519_STR).unwrap()),
+            (1612u32.into(), 1613u32.into()),
         ];
         for (secret, prime) in test_cases {
             let generate_result = generate_share(GenerateShareParams {
@@ -531,21 +533,16 @@ mod tests {
 
     #[test]
     fn test_generate_secret_value_fail_cases() {
-        let test_cases: Vec<(BigInt, BigInt)> = vec![
-            ((-1_isize).into(), 1613.into()),
+        let test_cases: Vec<(BigUint, BigUint)> = vec![
+            (1613u32.into(), 1613u32.into()),
+            (1614u32.into(), 1613u32.into()),
             (
-                (-1_isize).into(),
-                BigInt::from_str(PRIME_25519_STR).unwrap(),
-            ),
-            (1613.into(), 1613.into()),
-            (1614.into(), 1613.into()),
-            (
-                BigInt::from_str(PRIME_25519_STR).unwrap(),
-                BigInt::from_str(PRIME_25519_STR).unwrap(),
+                BigUint::from_str(PRIME_25519_STR).unwrap(),
+                BigUint::from_str(PRIME_25519_STR).unwrap(),
             ),
             (
-                BigInt::from_str(PRIME_25519_STR).unwrap() + 1,
-                BigInt::from_str(PRIME_25519_STR).unwrap(),
+                BigUint::from_str(PRIME_25519_STR).unwrap() + 1u32,
+                BigUint::from_str(PRIME_25519_STR).unwrap(),
             ),
         ];
         for test_case in test_cases {
@@ -579,10 +576,10 @@ mod tests {
 
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
-                secret: 1234.into(),
+                secret: 1234u32.into(),
                 threshold: test_case.1,
                 shares: test_case.2,
-                prime: 1613.into(),
+                prime: 1613u32.into(),
                 coefficients: None,
             });
             match test_case.0 {
@@ -602,9 +599,9 @@ mod tests {
                     for val in subsets(&generate_result.unwrap().shares, test_case.1) {
                         let reconstruct_result = reconstruct(ReconstructParams {
                             shares: val,
-                            prime: 1613.into(),
+                            prime: 1613u32.into(),
                         });
-                        assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                        assert_eq!(reconstruct_result.unwrap().secret, 1234u32.into());
                     }
                 }
             }
@@ -613,30 +610,28 @@ mod tests {
 
     #[test]
     fn test_coefficients_user_provided() {
-        let test_cases: Vec<(bool, usize, Vec<BigInt>)> = vec![
+        let test_cases: Vec<(bool, usize, Vec<BigUint>)> = vec![
             // pass cases
-            (true, 2, vec![1.into()]),
-            (true, 3, vec![0.into(), 2.into()]),
-            (true, 3, vec![1.into(), 2.into()]),
+            (true, 2, vec![1u32.into()]),
+            (true, 3, vec![0u32.into(), 2u32.into()]),
+            (true, 3, vec![1u32.into(), 2u32.into()]),
             // fail cases: value must be [0, p)
-            (false, 2, vec![(-1_isize).into()]),
-            (false, 3, vec![1.into(), (-2_isize).into()]),
-            (false, 3, vec![1.into(), 1613.into()]),
-            (false, 3, vec![1.into(), 1614.into()]),
+            (false, 3, vec![1u32.into(), 1613u32.into()]),
+            (false, 3, vec![1u32.into(), 1614u32.into()]),
             // fail cases: wrong count
-            (false, 2, vec![1.into(), 2.into()]),
-            (false, 3, vec![1.into()]),
-            (false, 3, vec![1.into(), 2.into(), 3.into()]),
+            (false, 2, vec![1u32.into(), 2u32.into()]),
+            (false, 3, vec![1u32.into()]),
+            (false, 3, vec![1u32.into(), 2u32.into(), 3u32.into()]),
             // fail cases: a_{k-1} = 0
-            (false, 2, vec![0.into()]),
-            (false, 3, vec![1.into(), 0.into()]),
+            (false, 2, vec![0u32.into()]),
+            (false, 3, vec![1u32.into(), 0u32.into()]),
         ];
         for test_case in test_cases {
             let generate_result = generate_share(GenerateShareParams {
-                secret: 1234.into(),
+                secret: 1234u32.into(),
                 threshold: test_case.1,
                 shares: test_case.1,
-                prime: 1613.into(),
+                prime: 1613u32.into(),
                 coefficients: Some(test_case.2.clone()),
             });
             match test_case.0 {
@@ -656,36 +651,12 @@ mod tests {
                     for val in subsets(&generate_result.unwrap().shares, test_case.1) {
                         let reconstruct_result = reconstruct(ReconstructParams {
                             shares: val,
-                            prime: 1613.into(),
+                            prime: 1613u32.into(),
                         });
-                        assert_eq!(reconstruct_result.unwrap().secret, 1234.into());
+                        assert_eq!(reconstruct_result.unwrap().secret, 1234u32.into());
                     }
                 }
             }
-        }
-    }
-
-    #[test]
-    fn test_posrem() {
-        let test_cases = [
-            (-13, 5, 2),
-            (-5, 5, 0),
-            (-1, 5, 4),
-            (0, 5, 0),
-            (1, 5, 1),
-            (5, 5, 0),
-            (13, 5, 3),
-        ];
-
-        for (a, b, expected) in test_cases {
-            assert_eq!(
-                posrem(a.into(), b.into()),
-                expected.into(),
-                "posrem({}, {}) should be {}",
-                a,
-                b,
-                expected
-            )
         }
     }
 }
