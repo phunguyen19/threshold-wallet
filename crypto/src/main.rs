@@ -1,4 +1,4 @@
-use std::{ops::Neg, str::FromStr};
+use std::str::FromStr;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use num_bigint::{BigUint, RandBigInt};
@@ -420,6 +420,48 @@ mod tests {
     }
 
     #[test]
+    fn test_shares_duplicate_x_should_fail() {
+        let generate_result = generate_share(GenerateShareParams {
+            secret: 1234u32.into(),
+            shares: 5,
+            threshold: 3,
+            prime: 1613u32.into(),
+            coefficients: Some(vec![166u32.into(), 94u32.into()]),
+        })
+        .unwrap();
+
+        for val in subsets(&generate_result.shares, 3).iter_mut() {
+            let dup_item = val.last().unwrap().clone();
+            val.push(dup_item.clone());
+            let reconstruct_result = reconstruct(ReconstructParams {
+                shares: val.clone(),
+                prime: 1613u32.into(),
+            });
+            assert!(reconstruct_result.is_err());
+            assert!(
+                reconstruct_result.err().unwrap().contains(
+                    format!(
+                        "shares must be unique, found duplicate x-coordinates: {:?}",
+                        dup_item.0
+                    )
+                    .as_str()
+                )
+            )
+        }
+
+        assert_eq!(
+            generate_result.shares,
+            [
+                (1u32.into(), 1494u32.into()),
+                (2u32.into(), 329u32.into()),
+                (3u32.into(), 965u32.into()),
+                (4u32.into(), 176u32.into()),
+                (5u32.into(), 1188u32.into())
+            ]
+        );
+    }
+
+    #[test]
     fn test_fewer_than_k_should_not_build_secret() {
         let test_cases: Vec<(usize, usize, Option<Vec<BigUint>>)> = vec![
             (5, 3, Some(vec![166u32.into(), 94u32.into()])),
@@ -438,7 +480,7 @@ mod tests {
             for val in subsets(&generate_result.shares, t.1 - 1) {
                 let reconstruct_result = reconstruct(ReconstructParams {
                     shares: val,
-                    prime: 1613u32.into(),
+                    prime: BigUint::from_str(PRIME_25519_STR).unwrap(),
                 })
                 .unwrap();
                 assert!(reconstruct_result.secret != 1234u32.into());
