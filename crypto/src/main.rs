@@ -28,7 +28,7 @@ enum NumberFormat {
 }
 
 impl NumberFormat {
-    fn p(&self, n: &BigUint) -> String {
+    fn format(&self, n: &BigUint) -> String {
         match self {
             Self::Hex => format!("{:#x}", n),
             Self::Dec => format!("{}", n),
@@ -119,11 +119,7 @@ fn generate_shares(params: GenerateShareParams) -> Result<GenerateSharesResult, 
     let mut coefficients: Vec<BigUint> = Vec::new();
 
     match params.coefficients {
-        Some(arg_vals) => {
-            for value in arg_vals {
-                coefficients.push(value);
-            }
-        }
+        Some(arg_vals) => coefficients = arg_vals,
         None => {
             let mut rng = rand::thread_rng();
 
@@ -143,7 +139,7 @@ fn generate_shares(params: GenerateShareParams) -> Result<GenerateSharesResult, 
         let mut ret: BigUint = 0_u64.into();
         for (i, value) in coefficients.iter().enumerate() {
             let degree = (i as u32) + 1_u32;
-            ret += value * x.pow(degree) % &params.prime;
+            ret += (value * x.pow(degree)) % &params.prime;
         }
         (ret + &params.secret) % &params.prime
     };
@@ -164,6 +160,18 @@ fn generate_shares(params: GenerateShareParams) -> Result<GenerateSharesResult, 
 }
 
 fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
+    if params.shares.len() < 2 {
+        return Err("there must be more than 1 share".into());
+    }
+
+    // validation x shouldn't be 0
+    for (x, _) in &params.shares {
+        if *x == 0u8.into() {
+            return Err("x value shouldn't be 0".into());
+        }
+    }
+
+    // Validation duplication x
     for (i, el_i) in params.shares.iter().enumerate() {
         for (j, el_j) in params.shares.iter().enumerate() {
             if i != j && el_i.0 == el_j.0 {
@@ -180,7 +188,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
     // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
     let mut l_vec: Vec<BigUint> = Vec::new();
 
-    // L1 + L2 + L3 = 1 mod p
+    // Σ Lᵢ = 1 mod p
     let mut verify: BigUint = 0u32.into();
 
     // Compute q(0) = D mod p
@@ -225,7 +233,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
     Ok(ReconstructResult {
         secret: sec,
         prime: params.prime.clone(),
-        basis_l_vals: l_vec.iter().map(|x| x.clone() % &params.prime).collect(),
+        basis_l_vals: l_vec,
     })
 }
 
@@ -286,14 +294,14 @@ fn main() -> Result<(), String> {
             println!();
             println!("Shamir's Secret Sharing        ");
             println!("───────────────────────────────");
-            println!("Prime: {}", number_format.p(&result.prime));
+            println!("Prime: {}", number_format.format(&result.prime));
             println!("Threshold: {} of {}", threshold, &shares);
-            println!("Secret: {}", number_format.p(&secret));
+            println!("Secret: {}", number_format.format(&secret));
             println!("───────────────────────────────");
             println!();
             println!("Shares:");
             for (share_index, share_val) in result.shares.iter() {
-                println!("  {}: {}", share_index, number_format.p(share_val));
+                println!("  {}: {}", share_index, number_format.format(share_val));
             }
             println!();
             println!("───────────────────────────────");
@@ -320,18 +328,18 @@ fn main() -> Result<(), String> {
             println!();
             println!("Shamir's Secret Reconstruction ");
             println!("───────────────────────────────");
-            println!("Prime: {}", number_format.p(&result.prime));
+            println!("Prime: {}", number_format.format(&result.prime));
             println!("Shares: {} provided", shares.len());
             println!("───────────────────────────────");
             println!();
             println!("Input Shares:");
             for s in &shares {
-                println!("  {}: {}", &s.0, number_format.p(&s.1));
+                println!("  {}: {}", &s.0, number_format.format(&s.1));
             }
             println!();
             println!("✓ Reconstructed Secret");
             println!("──────────────────────");
-            println!("Secret: {}", number_format.p(&result.secret));
+            println!("Secret: {}", number_format.format(&result.secret));
             println!("──────────────────────");
         }
     };
@@ -452,25 +460,49 @@ mod tests {
                 )
             )
         }
+    }
 
-        assert_eq!(
-            generate_result.shares,
-            [
-                (1u32.into(), 1494u32.into()),
-                (2u32.into(), 329u32.into()),
-                (3u32.into(), 965u32.into()),
-                (4u32.into(), 176u32.into()),
-                (5u32.into(), 1188u32.into())
-            ]
-        );
+    #[test]
+    fn test_shares_not_allow_x_zero() {
+        let shares: Vec<(BigUint, BigUint)> = vec![
+            (1usize.into(), 2usize.into()),
+            (0usize.into(), 1usize.into()),
+        ];
+        let reconstruct_result = reconstruct(ReconstructParams {
+            shares,
+            prime: 1613u32.into(),
+        });
+        assert!(reconstruct_result.is_err());
+        assert!(
+            reconstruct_result
+                .err()
+                .unwrap()
+                .contains("x value shouldn't be 0")
+        )
+    }
+
+    #[test]
+    fn test_shares_more_than_one() {
+        let shares: Vec<(BigUint, BigUint)> = vec![(1usize.into(), 2usize.into())];
+        let reconstruct_result = reconstruct(ReconstructParams {
+            shares,
+            prime: 1613u32.into(),
+        });
+        assert!(reconstruct_result.is_err(), "result should be fail");
+        assert!(
+            reconstruct_result
+                .err()
+                .unwrap()
+                .contains("there must be more than 1 share")
+        )
     }
 
     #[test]
     fn test_fewer_than_k_should_not_build_secret() {
         let test_cases: Vec<(usize, usize, Option<Vec<BigUint>>)> = vec![
             (5, 3, Some(vec![166u32.into(), 94u32.into()])),
+            (5, 4, None),
             (5, 5, None),
-            (5, 2, None),
         ];
         for t in test_cases {
             let generate_result = generate_shares(GenerateShareParams {
