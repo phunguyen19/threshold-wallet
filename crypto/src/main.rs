@@ -13,8 +13,8 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    #[arg(long, global = true, value_enum, default_value_t = NumMod::Hex)]
-    num_mod: NumMod,
+    #[arg(long, global = true, value_enum, default_value_t = NumberFormat::Hex)]
+    number_format: NumberFormat,
 
     #[arg(long, global = true)]
     verbose: bool,
@@ -22,9 +22,18 @@ struct Cli {
 
 #[derive(Debug, Clone, ValueEnum)]
 #[clap(rename_all = "lower")]
-enum NumMod {
+enum NumberFormat {
     Hex,
     Dec,
+}
+
+impl NumberFormat {
+    fn p(&self, n: &BigUint) -> String {
+        match self {
+            Self::Hex => format!("{:#x}", n),
+            Self::Dec => format!("{}", n),
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -62,84 +71,6 @@ enum Commands {
     },
 }
 
-fn main() -> Result<(), String> {
-    let args = Cli::parse();
-    let num_format = new_num_format(&args.num_mod);
-
-    match args.command {
-        Commands::Generate {
-            secret,
-            shares,
-            threshold,
-            prime,
-            coefficients: arg_coefficients,
-        } => {
-            let result = generate_share(GenerateShareParams {
-                secret: secret.clone(),
-                shares,
-                threshold,
-                prime: prime.clone(),
-                coefficients: arg_coefficients,
-            })?;
-
-            if args.verbose {
-                println!("coefficients: {:?}", result.coefficients);
-            }
-
-            println!();
-            println!("Shamir's Secret Sharing        ");
-            println!("───────────────────────────────");
-            println!("Prime: {}", num_format(&result.prime));
-            println!("Threshold: {} of {}", threshold, &shares);
-            println!("Secret: {}", num_format(&secret));
-            println!("───────────────────────────────");
-            println!();
-            println!("Shares:");
-            for (share_index, share_val) in result.shares.iter() {
-                println!("  {}: {}", share_index, num_format(share_val));
-            }
-            println!();
-            println!("───────────────────────────────");
-            println!(
-                "⚠️  Store shares separately. Any {} can reconstruct the secret.",
-                threshold
-            );
-        }
-        Commands::Reconstruct { shares, prime } => {
-            // Validate shares format is correct x,y
-            let result = reconstruct(ReconstructParams {
-                shares: shares.clone(),
-                prime: prime.clone(),
-            })?;
-
-            if args.verbose {
-                println!("Input: {:?} {:?}", shares, prime);
-                println!("share_points: {:?}", shares);
-                println!("l_vec: {:?}", result.basis_l_vals);
-            }
-
-            println!();
-            println!("Shamir's Secret Reconstruction ");
-            println!("───────────────────────────────");
-            println!("Prime: {}", num_format(&result.prime));
-            println!("Shares: {} provided", shares.len());
-            println!("───────────────────────────────");
-            println!();
-            println!("Input Shares:");
-            for s in &shares {
-                println!("  {}: {}", &s.0, num_format(&s.1));
-            }
-            println!();
-            println!("✓ Reconstructed Secret");
-            println!("──────────────────────");
-            println!("Secret: {}", num_format(&result.secret));
-            println!("──────────────────────");
-        }
-    };
-
-    Ok(())
-}
-
 struct GenerateShareParams {
     secret: BigUint,
     shares: usize,
@@ -152,6 +83,17 @@ struct GenerateSharesResult {
     shares: Vec<(BigUint, BigUint)>,
     coefficients: Vec<BigUint>,
     prime: BigUint,
+}
+
+struct ReconstructParams {
+    shares: Vec<(BigUint, BigUint)>,
+    prime: BigUint,
+}
+
+struct ReconstructResult {
+    secret: BigUint,
+    prime: BigUint,
+    basis_l_vals: Vec<BigUint>,
 }
 
 fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
@@ -197,7 +139,7 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
     }
 
     // The polynomial function
-    let polynomial_func = |x: BigUint| -> BigUint {
+    let polynomial_func = |x: &BigUint| -> BigUint {
         let mut ret: BigUint = 0_u64.into();
         for (i, value) in coefficients.iter().enumerate() {
             let degree = (i as u32) + 1_u32;
@@ -209,9 +151,9 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
     // Calculate shares
     let mut shares: Vec<(BigUint, BigUint)> = Vec::new();
     for i in 0..params.shares {
-        let index = i + 1;
-        let val = polynomial_func(index.into());
-        shares.push((index.into(), val));
+        let index: BigUint = (i + 1).into();
+        let val = polynomial_func(&index);
+        shares.push((index, val));
     }
 
     Ok(GenerateSharesResult {
@@ -219,17 +161,6 @@ fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, S
         coefficients,
         prime: params.prime,
     })
-}
-
-struct ReconstructParams {
-    shares: Vec<(BigUint, BigUint)>,
-    prime: BigUint,
-}
-
-struct ReconstructResult {
-    secret: BigUint,
-    prime: BigUint,
-    basis_l_vals: Vec<BigUint>,
 }
 
 fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
@@ -264,7 +195,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
                 continue;
             }
 
-            if &val.0 < &val2.0 {
+            if val.0 < val2.0 {
                 denominator *= &val2.0 - &val.0;
                 numerator *= &val2.0 % &params.prime;
             } else {
@@ -299,14 +230,13 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
 }
 
 fn parse_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
-    let mut share_point: (BigUint, BigUint) = (0_usize.into(), 0_usize.into());
     let s: Vec<&str> = val.split(":").collect();
     if s.len() != 2 {
         return Err(format!("cannot parse share param: {:?}", val));
     }
 
-    match BigUint::from_str(s[0]) {
-        Ok(x) => share_point.0 = x,
+    let x = match BigUint::from_str(s[0]) {
+        Ok(v) => v,
         Err(e) => {
             return Err(format!(
                 "cannot parse x={} of share={:?} . error: {:?}",
@@ -315,24 +245,98 @@ fn parse_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
         }
     };
 
-    match BigUint::from_str(s[1]) {
-        Ok(y) => share_point.1 = y,
+    let y = match BigUint::from_str(s[1]) {
+        Ok(v) => v,
         Err(e) => {
             return Err(format!(
                 "cannot parse y={} of share={:?} . Error: {:?}",
                 s[1], val, e
             ));
         }
-    }
+    };
 
-    Ok(share_point)
+    Ok((x, y))
 }
 
-fn new_num_format(m: &NumMod) -> Box<dyn Fn(&BigUint) -> String> {
-    match m {
-        NumMod::Hex => Box::new(move |n: &BigUint| format!("{:#x}", n)),
-        NumMod::Dec => Box::new(move |n: &BigUint| format!("{}", n)),
-    }
+fn main() -> Result<(), String> {
+    let args = Cli::parse();
+
+    match args.command {
+        Commands::Generate {
+            secret,
+            shares,
+            threshold,
+            prime,
+            coefficients: arg_coefficients,
+        } => {
+            let result = generate_share(GenerateShareParams {
+                secret: secret.clone(),
+                shares,
+                threshold,
+                prime: prime.clone(),
+                coefficients: arg_coefficients,
+            })?;
+
+            let number_format = &args.number_format;
+
+            if args.verbose {
+                println!("coefficients: {:?}", result.coefficients);
+            }
+
+            println!();
+            println!("Shamir's Secret Sharing        ");
+            println!("───────────────────────────────");
+            println!("Prime: {}", number_format.p(&result.prime));
+            println!("Threshold: {} of {}", threshold, &shares);
+            println!("Secret: {}", number_format.p(&secret));
+            println!("───────────────────────────────");
+            println!();
+            println!("Shares:");
+            for (share_index, share_val) in result.shares.iter() {
+                println!("  {}: {}", share_index, number_format.p(share_val));
+            }
+            println!();
+            println!("───────────────────────────────");
+            println!(
+                "⚠️  Store shares separately. Any {} can reconstruct the secret.",
+                threshold
+            );
+        }
+        Commands::Reconstruct { shares, prime } => {
+            // Validate shares format is correct x,y
+            let result = reconstruct(ReconstructParams {
+                shares: shares.clone(),
+                prime: prime.clone(),
+            })?;
+
+            let number_format = &args.number_format;
+
+            if args.verbose {
+                println!("Input: {:?} {:?}", shares, prime);
+                println!("share_points: {:?}", shares);
+                println!("l_vec: {:?}", result.basis_l_vals);
+            }
+
+            println!();
+            println!("Shamir's Secret Reconstruction ");
+            println!("───────────────────────────────");
+            println!("Prime: {}", number_format.p(&result.prime));
+            println!("Shares: {} provided", shares.len());
+            println!("───────────────────────────────");
+            println!();
+            println!("Input Shares:");
+            for s in &shares {
+                println!("  {}: {}", &s.0, number_format.p(&s.1));
+            }
+            println!();
+            println!("✓ Reconstructed Secret");
+            println!("──────────────────────");
+            println!("Secret: {}", number_format.p(&result.secret));
+            println!("──────────────────────");
+        }
+    };
+
+    Ok(())
 }
 
 #[cfg(test)]
