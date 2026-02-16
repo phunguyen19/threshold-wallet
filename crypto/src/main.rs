@@ -96,7 +96,7 @@ struct ReconstructResult {
     basis_l_vals: Vec<BigUint>,
 }
 
-fn generate_share(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
+fn generate_shares(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
     if params.secret >= params.prime {
         return Err("invalid secret or prime values. It must be 0 <= secret < prime".into());
     }
@@ -269,7 +269,7 @@ fn main() -> Result<(), String> {
             prime,
             coefficients: arg_coefficients,
         } => {
-            let result = generate_share(GenerateShareParams {
+            let result = generate_shares(GenerateShareParams {
                 secret: secret.clone(),
                 shares,
                 threshold,
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_full_flow_preset() {
-        let generate_result = generate_share(GenerateShareParams {
+        let generate_result = generate_shares(GenerateShareParams {
             secret: 1234u32.into(),
             shares: 5,
             threshold: 3,
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn test_full_flow_prime_25519() {
         let prime = BigUint::from_str(PRIME_25519_STR).unwrap();
-        let generate_result = generate_share(GenerateShareParams {
+        let generate_result = generate_shares(GenerateShareParams {
             secret: 1234u32.into(),
             shares: 5,
             threshold: 3,
@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_shares_duplicate_x_should_fail() {
-        let generate_result = generate_share(GenerateShareParams {
+        let generate_result = generate_shares(GenerateShareParams {
             secret: 1234u32.into(),
             shares: 5,
             threshold: 3,
@@ -473,7 +473,7 @@ mod tests {
             (5, 2, None),
         ];
         for t in test_cases {
-            let generate_result = generate_share(GenerateShareParams {
+            let generate_result = generate_shares(GenerateShareParams {
                 secret: 1234u32.into(),
                 shares: t.0,
                 threshold: t.1,
@@ -501,7 +501,7 @@ mod tests {
             (7, 5, None),
         ];
         for t in test_cases {
-            let generate_result = generate_share(GenerateShareParams {
+            let generate_result = generate_shares(GenerateShareParams {
                 secret: 1234u32.into(),
                 shares: t.0,
                 threshold: t.1,
@@ -525,7 +525,7 @@ mod tests {
         let prime = BigUint::from_str(PRIME_25519_STR).unwrap();
         let test_cases: Vec<usize> = vec![2, 3, 4, 5];
         for t in test_cases {
-            let generate_result = generate_share(GenerateShareParams {
+            let generate_result = generate_shares(GenerateShareParams {
                 secret: 1234u32.into(),
                 shares: 5,
                 threshold: t,
@@ -557,7 +557,7 @@ mod tests {
             (1612u32.into(), 1613u32.into()),
         ];
         for (secret, prime) in test_cases {
-            let generate_result = generate_share(GenerateShareParams {
+            let generate_result = generate_shares(GenerateShareParams {
                 secret: secret.clone(),
                 shares: 2,
                 threshold: 2,
@@ -593,7 +593,7 @@ mod tests {
         ];
         for test_case in test_cases {
             let t = test_case.clone();
-            let generate_result = generate_share(GenerateShareParams {
+            let generate_result = generate_shares(GenerateShareParams {
                 secret: t.0,
                 shares: 2,
                 threshold: 2,
@@ -621,7 +621,7 @@ mod tests {
         ];
 
         for test_case in test_cases {
-            let generate_result = generate_share(GenerateShareParams {
+            let generate_result = generate_shares(GenerateShareParams {
                 secret: 1234u32.into(),
                 threshold: test_case.1,
                 shares: test_case.2,
@@ -673,7 +673,7 @@ mod tests {
             (false, 3, vec![1u32.into(), 0u32.into()]),
         ];
         for test_case in test_cases {
-            let generate_result = generate_share(GenerateShareParams {
+            let generate_result = generate_shares(GenerateShareParams {
                 secret: 1234u32.into(),
                 threshold: test_case.1,
                 shares: test_case.1,
