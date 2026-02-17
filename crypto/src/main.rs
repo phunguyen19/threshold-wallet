@@ -61,7 +61,7 @@ enum Commands {
         coefficients: Option<Vec<BigUint>>,
     },
     Reconstruct {
-        // List of shares for reconstruct the secret
+        /// List of shares for reconstruct the secret
         #[arg(long, short, value_parser = parse_shares_param)]
         shares: Vec<(BigUint, BigUint)>,
 
@@ -101,7 +101,7 @@ fn generate_shares(params: GenerateShareParams) -> Result<GenerateSharesResult, 
         return Err("shares count must be smaller than prime".into());
     }
     if params.secret >= params.prime {
-        return Err("invalid secret or prime values. It must be 0 <= secret < prime".into());
+        return Err("invalid secret or prime values, it must be 0 <= secret < prime".into());
     }
     if params.threshold < 2 || params.threshold > params.shares {
         return Err("invalid threshold or share value. It must be 1 < threshold <= shares".into());
@@ -168,15 +168,15 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
     }
 
     if params.prime <= params.shares.len().into() {
-        return Err("shares count must be samller than prime".into());
+        return Err("shares count must be smaller than prime".into());
     }
 
     for (x, _) in &params.shares {
         if *x >= params.prime {
-            return Err("x value should be smaller than prime".into());
+            return Err("x value must be smaller than prime".into());
         }
         if *x == BigUint::ZERO {
-            return Err("x value shouldn't be 0".into());
+            return Err("x value must greater than 0".into());
         }
     }
 
@@ -495,7 +495,7 @@ mod tests {
             reconstruct_result
                 .err()
                 .unwrap()
-                .contains("shares count must be samller than prime")
+                .contains("shares count must be smaller than prime")
         )
     }
 
@@ -523,7 +523,7 @@ mod tests {
                 reconstruct_result
                     .err()
                     .unwrap()
-                    .contains("x value should be smaller than prime")
+                    .contains("x value must be smaller than prime")
             )
         }
     }
@@ -574,7 +574,7 @@ mod tests {
             reconstruct_result
                 .err()
                 .unwrap()
-                .contains("x value shouldn't be 0")
+                .contains("x value must greater than 0")
         )
     }
 
