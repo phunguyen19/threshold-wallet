@@ -108,7 +108,7 @@ fn generate_shares(params: GenerateShareParams) -> Result<GenerateSharesResult, 
     }
     if let Some(c) = &params.coefficients {
         if c.len() != params.threshold - 1 {
-            return Err("coefficients list must be equal threshold -1".into());
+            return Err("coefficients list must equal threshold -1".into());
         }
         if c.iter().any(|x| x >= &params.prime) {
             return Err("coefficient values must be in [0, p)".into());
@@ -176,7 +176,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
             return Err("x value must be smaller than prime".into());
         }
         if *x == BigUint::ZERO {
-            return Err("x value must greater than 0".into());
+            return Err("x value must be greater than 0".into());
         }
     }
 
@@ -263,7 +263,7 @@ fn parse_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
-                "cannot parse x={} of share={:?} . error: {:?}",
+                "cannot parse x={} of share={:?} error: {:?}",
                 s[0], val, e
             ));
         }
@@ -273,7 +273,7 @@ fn parse_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
-                "cannot parse y={} of share={:?} . Error: {:?}",
+                "cannot parse y={} of share={:?} error: {:?}",
                 s[1], val, e
             ));
         }
@@ -574,7 +574,7 @@ mod tests {
             reconstruct_result
                 .err()
                 .unwrap()
-                .contains("x value must greater than 0")
+                .contains("x value must be greater than 0")
         )
     }
 
