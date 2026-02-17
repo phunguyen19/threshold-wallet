@@ -97,8 +97,8 @@ struct ReconstructResult {
 }
 
 fn generate_shares(params: GenerateShareParams) -> Result<GenerateSharesResult, String> {
-    if params.prime < params.shares.into() {
-        return Err("shares count must be <= prime".into());
+    if params.prime <= params.shares.into() {
+        return Err("shares count must be smaller than prime".into());
     }
     if params.secret >= params.prime {
         return Err("invalid secret or prime values. It must be 0 <= secret < prime".into());
@@ -167,18 +167,14 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
         return Err("there must be more than 1 share".into());
     }
 
-    if params.prime < params.shares.len().into() {
-        return Err("shares count must be <= prime".into());
+    if params.prime <= params.shares.len().into() {
+        return Err("shares count must be samller than prime".into());
     }
 
     for (x, _) in &params.shares {
-        if *x > params.prime {
-            return Err("x value shouldn't greater than prime".into());
+        if *x >= params.prime {
+            return Err("x value should be smaller than prime".into());
         }
-    }
-
-    // validation x shouldn't be 0
-    for (x, _) in &params.shares {
         if *x == BigUint::ZERO {
             return Err("x value shouldn't be 0".into());
         }
@@ -451,24 +447,36 @@ mod tests {
     }
 
     #[test]
-    fn test_shares_should_not_greater_than_prime() {
-        let test_cases_gen_shares: Vec<(usize, BigUint)> =
-            vec![(4, 3u32.into()), (1614, 1613u32.into())];
+    fn test_shares_count_should_be_smaller_than_prime() {
+        // (share, threshold)
+        let test_cases_gen_shares: Vec<(usize, BigUint)> = vec![
+            (3, 3u32.into()),
+            (4, 3u32.into()),
+            (1613, 1613u32.into()),
+            (1614, 1613u32.into()),
+        ];
 
-        for (shares, prime) in test_cases_gen_shares {
+        for (shares, prime) in &test_cases_gen_shares {
             let generate_result = generate_shares(GenerateShareParams {
                 secret: 1234u32.into(),
-                shares,
+                shares: *shares,
                 threshold: shares - 1,
-                prime,
+                prime: prime.clone(),
                 coefficients: Some(vec![166u32.into(), 94u32.into()]),
             });
-            assert!(generate_result.is_err());
+            assert!(
+                generate_result.is_err(),
+                "expect case {:?} to fail",
+                (shares, prime)
+            );
             assert!(
                 generate_result
+                    .as_ref()
                     .err()
                     .unwrap()
-                    .contains("shares count must be <= prime")
+                    .contains("shares count must be smaller than prime"),
+                "fail expect error message, actual: {:?}",
+                generate_result.err()
             )
         }
 
@@ -487,27 +495,37 @@ mod tests {
             reconstruct_result
                 .err()
                 .unwrap()
-                .contains("shares count must be <= prime")
+                .contains("shares count must be samller than prime")
         )
     }
 
     #[test]
-    fn test_shares_value_x_should_not_greater_than_prime() {
-        let shares: Vec<(BigUint, BigUint)> = vec![
-            (1usize.into(), 2usize.into()),
-            (4usize.into(), 3usize.into()),
+    fn test_shares_value_x_should_be_smaller_than_prime() {
+        // [shares(x, y)]
+
+        let shares_vec: Vec<Vec<(BigUint, BigUint)>> = vec![
+            vec![
+                (1usize.into(), 2usize.into()),
+                (3usize.into(), 3usize.into()),
+            ],
+            vec![
+                (1usize.into(), 2usize.into()),
+                (4usize.into(), 3usize.into()),
+            ],
         ];
-        let reconstruct_result = reconstruct(ReconstructParams {
-            shares,
-            prime: 3u32.into(),
-        });
-        assert!(reconstruct_result.is_err());
-        assert!(
-            reconstruct_result
-                .err()
-                .unwrap()
-                .contains("x value shouldn't greater than prime")
-        )
+        for shares in shares_vec {
+            let reconstruct_result = reconstruct(ReconstructParams {
+                shares,
+                prime: 3u32.into(),
+            });
+            assert!(reconstruct_result.is_err());
+            assert!(
+                reconstruct_result
+                    .err()
+                    .unwrap()
+                    .contains("x value should be smaller than prime")
+            )
+        }
     }
 
     #[test]
