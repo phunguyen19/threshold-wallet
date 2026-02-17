@@ -179,7 +179,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
 
     // validation x shouldn't be 0
     for (x, _) in &params.shares {
-        if *x == 0u8.into() {
+        if *x == BigUint::ZERO {
             return Err("x value shouldn't be 0".into());
         }
     }
@@ -205,7 +205,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
     let mut verify: BigUint = 0u32.into();
 
     // Compute q(0) = D mod p
-    // q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x)
+    // q(x) = Σ yᵢ × Lᵢ(x)
     let mut sec: BigUint = 0u32.into();
 
     for s_i in &params.shares {
@@ -221,7 +221,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
             }
 
             if x_i < x_j {
-                numerator *= x_j % &params.prime;
+                numerator *= x_j;
                 denominator *= x_j - x_i;
             } else {
                 numerator *= &params.prime - x_j;
@@ -331,7 +331,6 @@ fn main() -> Result<(), String> {
             );
         }
         Commands::Reconstruct { shares, prime } => {
-            // Validate shares format is correct x,y
             let result = reconstruct(ReconstructParams {
                 shares: shares.clone(),
                 prime: prime.clone(),
