@@ -16,11 +16,20 @@ cargo fmt             # Format code
 The `shamir` CLI provides Shamir's Secret Sharing operations:
 
 ```bash
-# Generate shares from a secret
+# Generate shares from a secret (uses Curve25519 prime by default)
 cargo run -- generate --secret 1234 --shares 5 --threshold 3
 
-# Reconstruct secret from shares
-cargo run -- reconstruct --shares "1:123" --shares "3:456" --shares "5:789"
+# Generate with a custom prime (e.g., for educational use)
+cargo run -- generate --secret 1234 --shares 5 --threshold 3 --prime 1613
+
+# Generate with preset coefficients (comma-separated)
+cargo run -- generate --secret 1234 --shares 5 --threshold 3 --prime 1613 --coefficients 166,94
+
+# Reconstruct secret from shares (x:y format)
+cargo run -- reconstruct -s "1:1494" -s "3:965" -s "5:1188" -p 1613
+
+# Output numbers in decimal instead of hex (default: hex)
+cargo run -- --number-format dec generate --secret 1234 --shares 5 --threshold 3
 
 # Enable verbose output
 cargo run -- --verbose generate --secret 1234 --shares 5 --threshold 3
