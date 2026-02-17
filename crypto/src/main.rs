@@ -208,33 +208,40 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
     // q(x) = y₁ × L₁(x) + y₂ × L₂(x) + y₃ × L₃(x)
     let mut sec: BigUint = 0u32.into();
 
-    for val in &params.shares {
+    for s_i in &params.shares {
+        let x_i = &s_i.0;
+        let y_i = &s_i.1;
         let mut numerator: BigUint = 1_usize.into();
         let mut denominator: BigUint = 1_usize.into();
-        for val2 in &params.shares {
-            if val2.0 == val.0 {
+        for s_j in &params.shares {
+            let x_j = &s_j.0;
+
+            if x_i == x_j {
                 continue;
             }
 
-            if val.0 < val2.0 {
-                denominator *= &val2.0 - &val.0;
-                numerator *= &val2.0 % &params.prime;
+            if x_i < x_j {
+                numerator *= x_j % &params.prime;
+                denominator *= x_j - x_i;
             } else {
-                denominator *= &val.0 - &val2.0;
-                numerator *= &params.prime - &val2.0;
+                numerator *= &params.prime - x_j;
+                denominator *= x_i - x_j;
             }
         }
 
         let denominator_inv_mod = match denominator.modinv(&params.prime) {
             Some(v) => v,
-            None => return Err(format!("cannot calculate inverse mod for share={:?}", val)),
+            None => return Err(format!("cannot calculate inverse mod for share={:?}", s_i)),
         };
 
         let numerator_mod = numerator % &params.prime;
 
         let l = (numerator_mod * denominator_inv_mod) % &params.prime;
+
         verify += &l;
-        sec = (sec + (&val.1 * &l)) % &params.prime;
+
+        sec = (sec + (y_i * &l)) % &params.prime;
+
         l_vec.push(l);
     }
 
@@ -245,7 +252,7 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
 
     Ok(ReconstructResult {
         secret: sec,
-        prime: params.prime.clone(),
+        prime: params.prime,
         basis_l_vals: l_vec,
     })
 }
