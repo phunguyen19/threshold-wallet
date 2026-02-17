@@ -486,6 +486,25 @@ mod tests {
     }
 
     #[test]
+    fn test_shares_value_x_should_not_greater_than_prime() {
+        let shares: Vec<(BigUint, BigUint)> = vec![
+            (1usize.into(), 2usize.into()),
+            (4usize.into(), 3usize.into()),
+        ];
+        let reconstruct_result = reconstruct(ReconstructParams {
+            shares,
+            prime: 3u32.into(),
+        });
+        assert!(reconstruct_result.is_err());
+        assert!(
+            reconstruct_result
+                .err()
+                .unwrap()
+                .contains("x value shouldn't greater than prime")
+        )
+    }
+
+    #[test]
     fn test_shares_duplicate_x_should_fail() {
         let generate_result = generate_shares(GenerateShareParams {
             secret: 1234u32.into(),
