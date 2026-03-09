@@ -1,0 +1,10 @@
+[package]
+name = "sss"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap.workspace = true
+num-bigint.workspace = true
+rand.workspace = true
+
