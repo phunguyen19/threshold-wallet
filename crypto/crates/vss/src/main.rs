@@ -56,8 +56,64 @@ enum Commands {
         #[arg(long, value_parser=parse_debug_coeffs)]
         debug_coeffs: Option<(Vec<BigUint>, Vec<BigUint>)>,
     },
-    Verify,
+    Verify {
+        /// List params prime:order:g:h
+        #[arg(long, value_parser=parse_pogh_param)]
+        pogh: Option<CliPogh>,
+
+        /// VSS commitment values
+        #[arg(long, value_delimiter = ':', value_parser = BigUint::from_str)]
+        commitments: Vec<BigUint>,
+
+        /// Share
+        #[arg(long, value_parser = parse_share_param)]
+        share: (usize, BigUint, BigUint),
+    },
     Reconstruct,
+}
+
+fn parse_share_param(input: &str) -> Result<(usize, BigUint, BigUint), String> {
+    // split by :
+    let vals: Vec<&str> = input.split(":").collect();
+    if vals.len() != 3 {
+        return Err(format!(
+            "share value must be in format index:s:t, receive: {:?}",
+            input
+        ));
+    }
+
+    // parse each value and return proper error
+    let index = match vals[0].parse::<usize>() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse index value {}, error: {:?}",
+                vals[0], e,
+            ));
+        }
+    };
+
+    let s = match BigUint::from_str(vals[0]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse s={} of share={:?} error: {:?}",
+                vals[0], input, e
+            ));
+        }
+    };
+
+    let t = match BigUint::from_str(vals[1]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse t={} of share={:?} error: {:?}",
+                vals[1], input, e
+            ));
+        }
+    };
+
+    return Ok((index, s, t));
 }
 
 #[derive(Debug, Clone)]
@@ -266,28 +322,7 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
     });
 }
 
-fn is_prime(n: &BigUint) -> bool {
-    let two: BigUint = 2_u8.into();
-
-    if n < &two {
-        return false;
-    }
-    if n == &two {
-        return true;
-    }
-    if n % &two == BigUint::ZERO {
-        return false;
-    }
-
-    let mut i: BigUint = 3_u8.into();
-    while &(&i * &i) <= n {
-        if n % &i == BigUint::ZERO {
-            return false;
-        }
-        i += &two;
-    }
-    true
-}
+struct VerifyParams {}
 
 fn main() {
     let args = Cli::parse();
@@ -315,6 +350,36 @@ fn main() {
                 }
             }
         }
+        Commands::Verify {
+            pogh,
+            commitments,
+            share,
+        } => {
+            println!("pass")
+        }
         _ => {}
     }
+}
+
+fn is_prime(n: &BigUint) -> bool {
+    let two: BigUint = 2_u8.into();
+
+    if n < &two {
+        return false;
+    }
+    if n == &two {
+        return true;
+    }
+    if n % &two == BigUint::ZERO {
+        return false;
+    }
+
+    let mut i: BigUint = 3_u8.into();
+    while &(&i * &i) <= n {
+        if n % &i == BigUint::ZERO {
+            return false;
+        }
+        i += &two;
+    }
+    true
 }
