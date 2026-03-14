@@ -212,15 +212,15 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
         return Err(format!("generator h {} is not valid", params.generator_h));
     }
     // validate coeffs f and g equal len
-    if params.coeffs_f.len() != params.coeffs_g.len() {
+    if params.coeffs_f.len() != params.coeffs_g.len() || params.coeffs_f.len() != params.threshold {
         return Err(format!(
-            "F and G must have the same number for coeffcients. Receives F coeffs {} G coeffs {}",
+            "F and G must have the number of coeffcients equal threshold. Receives F coeffs {} G coeffs {}",
             params.coeffs_f.len(),
             params.coeffs_g.len(),
         ));
     }
     // validate coeffs f and g valid
-    for coeff in [params.coeffs_f, params.coeffs_g].concat() {
+    for coeff in [params.coeffs_f.clone(), params.coeffs_g.clone()].concat() {
         if coeff < 1_u8.into() || coeff > params.order {
             return Err(format!(
                 "coefficients must not smaller than 1 and greater than order {}, receive {}",
@@ -228,6 +228,21 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
             ));
         }
     }
+
+    // Generate commitments
+    let mut commitments: Vec<BigUint> = vec![];
+    for i in 0..params.threshold {
+        let c = &params
+            .generator_g
+            .modpow(&params.coeffs_f[i], &params.prime)
+            * &params
+                .generator_h
+                .modpow(&params.coeffs_g[i], &params.prime);
+        commitments.push(c % &params.prime);
+    }
+
+    // == debug
+    println!("commitments: {:?}", commitments);
 
     return Err("".into());
 }
