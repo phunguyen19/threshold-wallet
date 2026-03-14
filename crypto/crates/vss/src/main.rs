@@ -161,6 +161,7 @@ fn parse_debug_coeffs(input: &str) -> Result<(Vec<BigUint>, Vec<BigUint>), Strin
     Ok((coeffs_f, coeffs_g))
 }
 
+#[derive(Debug)]
 struct DealParams {
     players: usize,
     threshold: usize,
@@ -181,6 +182,8 @@ struct DealResult {
 }
 
 fn deal(params: DealParams) -> Result<DealResult, String> {
+    println!("{:?}", params);
+
     // validate players is valid
     // validate threshold is valid and smaller than players
     if params.threshold < 2 || params.threshold > params.players {
@@ -241,10 +244,26 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
         commitments.push(c % &params.prime);
     }
 
-    // == debug
-    println!("commitments: {:?}", commitments);
+    // Generate share pairs
+    let polynomial = |x: &BigUint, coeffs: &Vec<BigUint>, modulus: &BigUint| -> BigUint {
+        let mut ret: BigUint = 0_u64.into();
+        for (degree, value) in coeffs.iter().enumerate() {
+            ret += (value * x.modpow(&degree.into(), modulus)) % modulus;
+        }
+        (ret) % modulus
+    };
 
-    return Err("".into());
+    let mut shares: Vec<(usize, BigUint, BigUint)> = vec![];
+    for i in 1..=params.players {
+        let s = polynomial(&i.into(), &params.coeffs_f, &params.order);
+        let t = polynomial(&i.into(), &params.coeffs_g, &params.order);
+        shares.push((i, s, t));
+    }
+
+    return Ok(DealResult {
+        commitments,
+        shares,
+    });
 }
 
 fn is_prime(n: &BigUint) -> bool {
@@ -272,7 +291,7 @@ fn is_prime(n: &BigUint) -> bool {
 
 fn main() {
     let args = Cli::parse();
-    println!("debug command: {:?}", args);
+    println!("{:?}", args);
     match args.command {
         Commands::Deal {
             players,
