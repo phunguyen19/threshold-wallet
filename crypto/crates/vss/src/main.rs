@@ -66,13 +66,21 @@ enum Commands {
         commitments: Vec<BigUint>,
 
         /// Share
-        #[arg(long, value_parser = parse_share_param)]
+        #[arg(long, value_parser = parse_verify_share_param)]
         share: (usize, BigUint, BigUint),
     },
-    Reconstruct,
+    Reconstruct {
+        /// List of shares for reconstruct the secret
+        #[arg(long, short, value_parser = parse_reconstruct_shares_param)]
+        shares: Vec<(BigUint, BigUint)>,
+
+        /// Optional prime value
+        #[arg(long, short, value_parser = BigUint::from_str, default_value = PRIME_25519_STR)]
+        prime: BigUint,
+    },
 }
 
-fn parse_share_param(input: &str) -> Result<(usize, BigUint, BigUint), String> {
+fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), String> {
     // split by :
     let vals: Vec<&str> = input.split(":").collect();
     if vals.len() != 3 {
@@ -93,27 +101,56 @@ fn parse_share_param(input: &str) -> Result<(usize, BigUint, BigUint), String> {
         }
     };
 
-    let s = match BigUint::from_str(vals[0]) {
+    let s = match BigUint::from_str(vals[1]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
                 "cannot parse s={} of share={:?} error: {:?}",
-                vals[0], input, e
-            ));
-        }
-    };
-
-    let t = match BigUint::from_str(vals[1]) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(format!(
-                "cannot parse t={} of share={:?} error: {:?}",
                 vals[1], input, e
             ));
         }
     };
 
+    let t = match BigUint::from_str(vals[2]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse t={} of share={:?} error: {:?}",
+                vals[2], input, e
+            ));
+        }
+    };
+
     return Ok((index, s, t));
+}
+
+fn parse_reconstruct_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
+    let s: Vec<&str> = val.split(":").collect();
+    if s.len() != 2 {
+        return Err(format!("cannot parse share param: {:?}", val));
+    }
+
+    let x = match BigUint::from_str(s[0]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse x={} of share={:?} error: {:?}",
+                s[0], val, e
+            ));
+        }
+    };
+
+    let y = match BigUint::from_str(s[1]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse y={} of share={:?} error: {:?}",
+                s[1], val, e
+            ));
+        }
+    };
+
+    Ok((x, y))
 }
 
 #[derive(Debug, Clone)]
@@ -322,9 +359,147 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
     });
 }
 
-struct VerifyParams {}
+#[derive(Debug)]
+struct VerifyParams {
+    generator_g: BigUint,
+    generator_h: BigUint,
+    commitments: Vec<BigUint>,
+    share: (usize, BigUint, BigUint),
+    modulus: BigUint,
+}
 
-fn main() {
+#[derive(Debug)]
+struct VerifyResult {
+    result: bool,
+    verify_share_value: BigUint,
+    verify_commitment_value: BigUint,
+}
+
+fn verify(params: VerifyParams) -> Result<VerifyResult, String> {
+    println!("{:?}", params);
+
+    let verify_share_value = (params.generator_g.modpow(&params.share.1, &params.modulus)
+        * params.generator_h.modpow(&params.share.2, &params.modulus))
+        % &params.modulus;
+
+    let mut verify_commitment_value: BigUint = 1_u8.into();
+    let idegree: BigUint = params.share.0.into();
+    for i in 0..params.commitments.len() {
+        let edegree = idegree.pow(i as u32);
+        verify_commitment_value *= params.commitments[i].modpow(&edegree, &params.modulus)
+    }
+    verify_commitment_value %= &params.modulus;
+
+    return Ok(VerifyResult {
+        result: verify_share_value == verify_commitment_value,
+        verify_share_value,
+        verify_commitment_value,
+    });
+}
+
+struct ReconstructParams {
+    shares: Vec<(BigUint, BigUint)>,
+    prime: BigUint,
+}
+
+struct ReconstructResult {
+    secret: BigUint,
+    prime: BigUint,
+    basis_l_vals: Vec<BigUint>,
+}
+
+fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
+    if params.shares.len() < 2 {
+        return Err("there must be more than 1 share".into());
+    }
+
+    if params.prime <= params.shares.len().into() {
+        return Err("shares count must be smaller than prime".into());
+    }
+
+    for (x, _) in &params.shares {
+        if *x >= params.prime {
+            return Err("x value must be smaller than prime".into());
+        }
+        if *x == BigUint::ZERO {
+            return Err("x value must be greater than 0".into());
+        }
+    }
+
+    // Validation duplication x
+    for (i, el_i) in params.shares.iter().enumerate() {
+        for (j, el_j) in params.shares.iter().enumerate() {
+            if i != j && el_i.0 == el_j.0 {
+                return Err(format!(
+                    "shares must be unique, found duplicate x-coordinates: {:?}",
+                    el_i.0
+                ));
+            }
+        }
+    }
+
+    // For each key point:
+    // Calculate: Li(0) mod p
+    // Lᵢ(x) = ∏(j≠i) [(x - xⱼ) / (xᵢ - xⱼ)]
+    let mut l_vec: Vec<BigUint> = Vec::new();
+
+    // Σ Lᵢ = 1 mod p
+    let mut verify: BigUint = 0u32.into();
+
+    // Compute q(0) = D mod p
+    // q(x) = Σ yᵢ × Lᵢ(x)
+    let mut sec: BigUint = 0u32.into();
+
+    for s_i in &params.shares {
+        let x_i = &s_i.0;
+        let y_i = &s_i.1;
+        let mut numerator: BigUint = 1_usize.into();
+        let mut denominator: BigUint = 1_usize.into();
+        for s_j in &params.shares {
+            let x_j = &s_j.0;
+
+            if x_i == x_j {
+                continue;
+            }
+
+            if x_i < x_j {
+                numerator *= x_j;
+                denominator *= x_j - x_i;
+            } else {
+                numerator *= &params.prime - x_j;
+                denominator *= x_i - x_j;
+            }
+        }
+
+        let denominator_inv_mod = match denominator.modinv(&params.prime) {
+            Some(v) => v,
+            None => return Err(format!("cannot calculate inverse mod for share={:?}", s_i)),
+        };
+
+        let numerator_mod = numerator % &params.prime;
+
+        let l = (numerator_mod * denominator_inv_mod) % &params.prime;
+
+        verify += &l;
+
+        sec = (sec + (y_i * &l)) % &params.prime;
+
+        l_vec.push(l);
+    }
+
+    // Verify: Sum(Li) = 1 mod p
+    if verify % &params.prime != 1_usize.into() {
+        return Err("shares are not in the same polynomial".into());
+    }
+
+    Ok(ReconstructResult {
+        secret: sec,
+        prime: params.prime,
+        basis_l_vals: l_vec,
+    })
+}
+
+fn main() -> Result<(), String> {
     let args = Cli::parse();
     println!("{:?}", args);
     match args.command {
@@ -349,15 +524,58 @@ fn main() {
                     println!("{:?}", r);
                 }
             }
+            Ok(())
         }
         Commands::Verify {
             pogh,
             commitments,
             share,
         } => {
-            println!("pass")
+            if let Some(pogh) = pogh {
+                let r = verify(VerifyParams {
+                    generator_g: pogh.generator_g,
+                    generator_h: pogh.generator_h,
+                    commitments,
+                    share,
+                    modulus: pogh.prime,
+                });
+                println!("{:?}", r);
+            }
+            Ok(())
         }
-        _ => {}
+        Commands::Reconstruct { shares, prime } => {
+            let result = reconstruct(ReconstructParams {
+                shares: shares.clone(),
+                prime: prime.clone(),
+            })?;
+
+            let number_format = &args.number_format;
+
+            if args.verbose {
+                println!("Input: {:?} {:?}", shares, prime);
+                println!("share_points: {:?}", shares);
+                println!("l_vec: {:?}", result.basis_l_vals);
+            }
+
+            println!();
+            println!("Shamir's Secret Reconstruction ");
+            println!("───────────────────────────────");
+            println!("Prime: {}", number_format.format(&result.prime));
+            println!("Shares: {} provided", shares.len());
+            println!("───────────────────────────────");
+            println!();
+            println!("Input Shares:");
+            for s in &shares {
+                println!("  {}: {}", &s.0, number_format.format(&s.1));
+            }
+            println!();
+            println!("✓ Reconstructed Secret");
+            println!("──────────────────────");
+            println!("Secret: {}", number_format.format(&result.secret));
+            println!("──────────────────────");
+
+            Ok(())
+        }
     }
 }
 
