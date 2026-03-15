@@ -1,4 +1,4 @@
-# Crypto
+# Shamir Secret Sharing
 
 ## Build Commands
 
