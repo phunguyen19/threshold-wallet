@@ -1,7 +1,10 @@
-use std::str::FromStr;
+use std::{array::TryFromSliceError, hash::Hash, str::FromStr};
 
 use clap::{ColorChoice, Parser, Subcommand, ValueEnum};
+use curve25519_dalek::{RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT};
 use num_bigint::{BigUint, RandBigInt};
+use rand::random;
+use sha2::Sha512;
 
 // Curve25519 prime: 2^255 - 19
 const PRIME_25519_STR: &str =
@@ -360,6 +363,54 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
 }
 
 #[derive(Debug)]
+struct DealCurveParams {
+    players: usize,
+    threshold: usize,
+    secret: BigUint,
+}
+
+struct DealCurveResult {}
+
+fn generate_g() -> RistrettoPoint {
+    return RISTRETTO_BASEPOINT_POINT;
+}
+
+fn generate_h() -> RistrettoPoint {
+    let msg = "VSS_pedersen_h_generator_v1";
+    return RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes());
+}
+
+// Commitment: E_j = g^a_j * h^b_j  (in EC: a_j*G + b_j*H)
+fn commit(a: Scalar, b: Scalar, g: RistrettoPoint, h: RistrettoPoint) -> RistrettoPoint {
+    g * a + h * b
+}
+
+fn deal_curve(params: DealCurveParams) -> Result<DealCurveResult, String> {
+    println!("{:?}", params);
+
+    // validate players is valid
+    // validate threshold is valid and smaller than players
+    if params.threshold < 2 || params.threshold > params.players {
+        return Err(format!(
+            "threshold must be greater than 1 and smaller than number of players {}, receive {}",
+            &params.players, &params.threshold
+        ));
+    }
+
+    let k = biguint_to_scalar(&params.secret).or_else(|e| {
+        return Err(format!(
+            "cannot convert {:?} to scalar, error: {:?}",
+            params.secret, e
+        ));
+    });
+
+    let mut csprng = rand::rngs::OsRng;
+    let t = Scalar::random(&mut csprng);
+
+    return Err("not implemented".into());
+}
+
+#[derive(Debug)]
 struct VerifyParams {
     generator_g: BigUint,
     generator_h: BigUint,
@@ -600,4 +651,15 @@ fn is_prime(n: &BigUint) -> bool {
         i += &two;
     }
     true
+}
+
+fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, TryFromSliceError> {
+    let mut b = n.to_bytes_le();
+    b.resize(64, 0u8);
+
+    // Defensive conversion to make sure
+    // it works regardless the size
+    let r: [u8; 64] = b[..64].try_into()?;
+
+    Ok(Scalar::from_bytes_mod_order_wide(&r))
 }
