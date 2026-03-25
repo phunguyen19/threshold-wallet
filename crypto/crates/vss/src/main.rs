@@ -265,8 +265,8 @@ struct DealParams {
     order: BigUint,
     generator_g: BigUint,
     generator_h: BigUint,
-    coeffs_f: Vec<BigUint>,
-    coeffs_g: Vec<BigUint>,
+    coeffs_a: Vec<BigUint>,
+    coeffs_b: Vec<BigUint>,
 }
 
 #[derive(Debug)]
@@ -275,6 +275,45 @@ struct DealResult {
     commitments: Vec<BigUint>,
     // (i, s_i, t_i)
     shares: Vec<(usize, BigUint, BigUint)>,
+}
+
+#[derive(Debug)]
+struct DealCurveParams {
+    players: usize,
+    threshold: usize,
+    secret: BigUint,
+}
+
+#[derive(Debug)]
+struct DealCurveResult {
+    // E_i
+    commitments: Vec<BigUint>,
+}
+
+fn generate_g() -> RistrettoPoint {
+    return RISTRETTO_BASEPOINT_POINT;
+}
+
+fn generate_h() -> RistrettoPoint {
+    let msg = "VSS_pedersen_h_generator_v1";
+    return RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes());
+}
+
+fn commit_custom(a: &BigUint, b: &BigUint, g: &BigUint, h: &BigUint, modulus: &BigUint) -> BigUint {
+    (g.modpow(a, modulus) * h.modpow(b, modulus)) % modulus
+}
+
+// Commitment: E_j = g^a_j * h^b_j  (in EC: a_j*G + b_j*H)
+fn commit_ec(a: &Scalar, b: &Scalar, g: &RistrettoPoint, h: &RistrettoPoint) -> RistrettoPoint {
+    g * a + h * b
+}
+
+fn gen_share_custom(x: &BigUint, coeffs: &Vec<BigUint>, modulus: &BigUint) -> BigUint {
+    let mut ret: BigUint = 0_u64.into();
+    for (degree, value) in coeffs.iter().enumerate() {
+        ret += (value * x.modpow(&degree.into(), modulus)) % modulus;
+    }
+    (ret) % modulus
 }
 
 fn deal(params: DealParams) -> Result<DealResult, String> {
@@ -311,15 +350,15 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
         return Err(format!("generator h {} is not valid", params.generator_h));
     }
     // validate coeffs f and g equal len
-    if params.coeffs_f.len() != params.coeffs_g.len() || params.coeffs_f.len() != params.threshold {
+    if params.coeffs_a.len() != params.coeffs_b.len() || params.coeffs_a.len() != params.threshold {
         return Err(format!(
             "F and G must have the number of coeffcients equal threshold. Receives F coeffs {} G coeffs {}",
-            params.coeffs_f.len(),
-            params.coeffs_g.len(),
+            params.coeffs_a.len(),
+            params.coeffs_b.len(),
         ));
     }
     // validate coeffs f and g valid
-    for coeff in [params.coeffs_f.clone(), params.coeffs_g.clone()].concat() {
+    for coeff in [params.coeffs_a.clone(), params.coeffs_b.clone()].concat() {
         if coeff < 1_u8.into() || coeff > params.order {
             return Err(format!(
                 "coefficients must not smaller than 1 and greater than order {}, receive {}",
@@ -331,28 +370,20 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
     // Generate commitments
     let mut commitments: Vec<BigUint> = vec![];
     for i in 0..params.threshold {
-        let c = &params
-            .generator_g
-            .modpow(&params.coeffs_f[i], &params.prime)
-            * &params
-                .generator_h
-                .modpow(&params.coeffs_g[i], &params.prime);
+        let c = commit_custom(
+            &params.coeffs_a[i],
+            &params.coeffs_b[i],
+            &params.generator_g,
+            &params.generator_h,
+            &params.prime,
+        );
         commitments.push(c % &params.prime);
     }
 
-    // Generate share pairs
-    let polynomial = |x: &BigUint, coeffs: &Vec<BigUint>, modulus: &BigUint| -> BigUint {
-        let mut ret: BigUint = 0_u64.into();
-        for (degree, value) in coeffs.iter().enumerate() {
-            ret += (value * x.modpow(&degree.into(), modulus)) % modulus;
-        }
-        (ret) % modulus
-    };
-
     let mut shares: Vec<(usize, BigUint, BigUint)> = vec![];
     for i in 1..=params.players {
-        let s = polynomial(&i.into(), &params.coeffs_f, &params.order);
-        let t = polynomial(&i.into(), &params.coeffs_g, &params.order);
+        let s = gen_share_custom(&i.into(), &params.coeffs_a, &params.order);
+        let t = gen_share_custom(&i.into(), &params.coeffs_b, &params.order);
         shares.push((i, s, t));
     }
 
@@ -362,30 +393,7 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
     });
 }
 
-#[derive(Debug)]
-struct DealCurveParams {
-    players: usize,
-    threshold: usize,
-    secret: BigUint,
-}
-
-struct DealCurveResult {}
-
-fn generate_g() -> RistrettoPoint {
-    return RISTRETTO_BASEPOINT_POINT;
-}
-
-fn generate_h() -> RistrettoPoint {
-    let msg = "VSS_pedersen_h_generator_v1";
-    return RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes());
-}
-
-// Commitment: E_j = g^a_j * h^b_j  (in EC: a_j*G + b_j*H)
-fn commit(a: Scalar, b: Scalar, g: RistrettoPoint, h: RistrettoPoint) -> RistrettoPoint {
-    g * a + h * b
-}
-
-fn deal_curve(params: DealCurveParams) -> Result<DealCurveResult, String> {
+fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
     println!("{:?}", params);
 
     // validate players is valid
@@ -397,17 +405,35 @@ fn deal_curve(params: DealCurveParams) -> Result<DealCurveResult, String> {
         ));
     }
 
-    let k = biguint_to_scalar(&params.secret).or_else(|e| {
+    let k: Scalar = biguint_to_scalar(&params.secret).or_else(|e| {
         return Err(format!(
             "cannot convert {:?} to scalar, error: {:?}",
             params.secret, e
         ));
-    });
+    })?;
 
     let mut csprng = rand::rngs::OsRng;
-    let t = Scalar::random(&mut csprng);
+    let t: Scalar = Scalar::random(&mut csprng);
 
-    return Err("not implemented".into());
+    let mut coeffs_a: Vec<Scalar> = vec![k];
+    let mut coeffs_b: Vec<Scalar> = vec![t];
+    for _ in 1_usize..params.threshold {
+        coeffs_a.push(Scalar::random(&mut csprng));
+        coeffs_b.push(Scalar::random(&mut csprng));
+    }
+
+    // Generate commitments
+    let mut commitments: Vec<BigUint> = vec![];
+    for i in 0..params.threshold {
+        commitments.push(ristretto_point_to_biguint(&commit_ec(
+            &coeffs_a[i],
+            &coeffs_b[i],
+            &generate_g(),
+            &generate_h(),
+        )));
+    }
+
+    return Ok(DealCurveResult { commitments });
 }
 
 #[derive(Debug)]
@@ -569,8 +595,8 @@ fn main() -> Result<(), String> {
                         order: poghv.order,
                         generator_g: poghv.generator_g,
                         generator_h: poghv.generator_h,
-                        coeffs_f: debug_coeffs_v.0,
-                        coeffs_g: debug_coeffs_v.1,
+                        coeffs_a: debug_coeffs_v.0,
+                        coeffs_b: debug_coeffs_v.1,
                     });
                     println!("{:?}", r);
                 }
@@ -662,4 +688,12 @@ fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, TryFromSliceError> {
     let r: [u8; 64] = b[..64].try_into()?;
 
     Ok(Scalar::from_bytes_mod_order_wide(&r))
+}
+
+fn scalar_to_biguint(n: &Scalar) -> BigUint {
+    BigUint::from_bytes_le(n.as_bytes())
+}
+
+fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
+    BigUint::from_bytes_le(n.compress().as_bytes())
 }
