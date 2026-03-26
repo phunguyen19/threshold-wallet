@@ -43,6 +43,10 @@ impl NumberFormat {
 enum Commands {
     /// Generate shares for a secret
     Deal {
+        /// Secret
+        #[arg(long, value_parser = BigUint::from_str)]
+        secret: BigUint,
+
         /// How many participants
         #[arg(long)]
         players: usize,
@@ -259,6 +263,7 @@ fn parse_debug_coeffs(input: &str) -> Result<(Vec<BigUint>, Vec<BigUint>), Strin
 
 #[derive(Debug)]
 struct DealParams {
+    secret: BigUint,
     players: usize,
     threshold: usize,
     prime: BigUint,
@@ -279,15 +284,17 @@ struct DealResult {
 
 #[derive(Debug)]
 struct DealCurveParams {
+    secret: BigUint,
     players: usize,
     threshold: usize,
-    secret: BigUint,
 }
 
 #[derive(Debug)]
 struct DealCurveResult {
     // E_i
     commitments: Vec<BigUint>,
+    // (i, s_i, t_i)
+    shares: Vec<(usize, BigUint, BigUint)>,
 }
 
 fn generate_g() -> RistrettoPoint {
@@ -308,15 +315,19 @@ fn commit_ec(a: &Scalar, b: &Scalar, g: &RistrettoPoint, h: &RistrettoPoint) -> 
     g * a + h * b
 }
 
-fn gen_share_custom(x: &BigUint, coeffs: &Vec<BigUint>, modulus: &BigUint) -> BigUint {
-    let mut ret: BigUint = 0_u64.into();
-    for (degree, value) in coeffs.iter().enumerate() {
-        ret += (value * x.modpow(&degree.into(), modulus)) % modulus;
-    }
-    (ret) % modulus
+fn gen_share_custom(x: &BigUint, coeffs: &[BigUint], modulus: &BigUint) -> BigUint {
+    coeffs
+        .iter()
+        .rev()
+        .fold(BigUint::ZERO, |acc, c| (acc * x + c) % modulus)
+        % modulus
 }
 
-fn deal(params: DealParams) -> Result<DealResult, String> {
+fn gen_share_ec(x: &Scalar, coeffs: &Vec<Scalar>) -> Scalar {
+    coeffs.iter().rev().fold(Scalar::ZERO, |acc, c| acc * x + c)
+}
+
+fn deal_custom(params: DealParams) -> Result<DealResult, String> {
     println!("{:?}", params);
 
     // validate players is valid
@@ -355,6 +366,13 @@ fn deal(params: DealParams) -> Result<DealResult, String> {
             "F and G must have the number of coeffcients equal threshold. Receives F coeffs {} G coeffs {}",
             params.coeffs_a.len(),
             params.coeffs_b.len(),
+        ));
+    }
+    // validate debug first free coeff
+    if &params.coeffs_a[0] != &params.secret {
+        return Err(format!(
+            "debug coeffs first free coeff must equal secret {}, found {}",
+            params.secret, params.coeffs_a[0]
         ));
     }
     // validate coeffs f and g valid
@@ -433,7 +451,17 @@ fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
         )));
     }
 
-    return Ok(DealCurveResult { commitments });
+    let mut shares: Vec<(usize, BigUint, BigUint)> = vec![];
+    for i in 1..=params.players {
+        let s = scalar_to_biguint(&gen_share_ec(&Scalar::from(i as u8), &coeffs_a));
+        let t = scalar_to_biguint(&gen_share_ec(&Scalar::from(i as u8), &coeffs_b));
+        shares.push((i, s, t));
+    }
+
+    return Ok(DealCurveResult {
+        commitments,
+        shares,
+    });
 }
 
 #[derive(Debug)]
@@ -581,6 +609,7 @@ fn main() -> Result<(), String> {
     println!("{:?}", args);
     match args.command {
         Commands::Deal {
+            secret,
             players,
             threshold,
             pogh,
@@ -588,7 +617,8 @@ fn main() -> Result<(), String> {
         } => {
             if let Some(poghv) = pogh {
                 if let Some(debug_coeffs_v) = debug_coeffs {
-                    let r = deal(DealParams {
+                    let r = deal_custom(DealParams {
+                        secret,
                         players,
                         threshold,
                         prime: poghv.prime,
@@ -600,6 +630,13 @@ fn main() -> Result<(), String> {
                     });
                     println!("{:?}", r);
                 }
+            } else {
+                let r = deal_ec(DealCurveParams {
+                    secret,
+                    players,
+                    threshold,
+                });
+                println!("{:?}", r);
             }
             Ok(())
         }
