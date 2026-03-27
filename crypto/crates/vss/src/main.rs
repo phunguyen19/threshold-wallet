@@ -1,7 +1,10 @@
 use std::{array::TryFromSliceError, hash::Hash, str::FromStr};
 
 use clap::{ColorChoice, Parser, Subcommand, ValueEnum};
-use curve25519_dalek::{RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT};
+use curve25519_dalek::{
+    RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, ristretto::CompressedRistretto,
+    traits::Identity,
+};
 use num_bigint::{BigUint, RandBigInt};
 use rand::random;
 use sha2::Sha512;
@@ -476,11 +479,11 @@ struct VerifyParams {
 #[derive(Debug)]
 struct VerifyResult {
     result: bool,
-    verify_share_value: BigUint,
     verify_commitment_value: BigUint,
+    verify_share_value: BigUint,
 }
 
-fn verify(params: VerifyParams) -> Result<VerifyResult, String> {
+fn verify_custom(params: VerifyParams) -> Result<VerifyResult, String> {
     println!("{:?}", params);
 
     let verify_share_value = (params.generator_g.modpow(&params.share.1, &params.modulus)
@@ -500,6 +503,42 @@ fn verify(params: VerifyParams) -> Result<VerifyResult, String> {
         verify_share_value,
         verify_commitment_value,
     });
+}
+
+#[derive(Debug)]
+struct VerifyECParams {
+    commitments: Vec<BigUint>,
+    share: (usize, BigUint, BigUint),
+}
+
+// Verify share EC
+// E(s_i, t_i) = g*s + h*t = \sum_{j=0}^{k-1}{E_j*i^j}
+fn verify_ec(params: VerifyECParams) -> Result<VerifyResult, String> {
+    println!("verify_ec params: {:?}", params);
+
+    let g = generate_g();
+    let h = generate_h();
+
+    let si: Scalar = biguint_to_scalar(&params.share.1)?;
+    let ti: Scalar = biguint_to_scalar(&params.share.2)?;
+
+    let lhs = g * si + h * ti;
+
+    // rhs sum(ej * i^j)
+    let mut rhs = RistrettoPoint::identity(); // (0,0)
+    let i = Scalar::from(params.share.0 as u64);
+    let mut ipowj = Scalar::ONE; // start with i^0 = 1
+    for ej in &params.commitments {
+        let ejscalar = biguint_to_ristretto_point(ej)?;
+        rhs += ejscalar * ipowj;
+        ipowj *= i;
+    }
+
+    Ok(VerifyResult {
+        result: lhs == rhs,
+        verify_commitment_value: ristretto_point_to_biguint(&lhs),
+        verify_share_value: ristretto_point_to_biguint(&rhs),
+    })
 }
 
 struct ReconstructParams {
@@ -646,7 +685,7 @@ fn main() -> Result<(), String> {
             share,
         } => {
             if let Some(pogh) = pogh {
-                let r = verify(VerifyParams {
+                let r = verify_custom(VerifyParams {
                     generator_g: pogh.generator_g,
                     generator_h: pogh.generator_h,
                     commitments,
@@ -654,6 +693,9 @@ fn main() -> Result<(), String> {
                     modulus: pogh.prime,
                 });
                 println!("{:?}", r);
+            } else {
+                let r = verify_ec(VerifyECParams { commitments, share });
+                println!("{:?}", r)
             }
             Ok(())
         }
@@ -716,19 +758,36 @@ fn is_prime(n: &BigUint) -> bool {
     true
 }
 
-fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, TryFromSliceError> {
+fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, String> {
     let mut b = n.to_bytes_le();
     b.resize(64, 0u8);
 
     // Defensive conversion to make sure
     // it works regardless the size
-    let r: [u8; 64] = b[..64].try_into()?;
+    let r: [u8; 64] = b[..64].try_into().or_else(|e| {
+        Err(format!(
+            "cannot convert value {:?} to be scalar, error: {:?}",
+            n, e
+        ))
+    })?;
 
     Ok(Scalar::from_bytes_mod_order_wide(&r))
 }
 
 fn scalar_to_biguint(n: &Scalar) -> BigUint {
     BigUint::from_bytes_le(n.as_bytes())
+}
+
+fn biguint_to_ristretto_point(n: &BigUint) -> Result<RistrettoPoint, String> {
+    let bytes = n.to_bytes_le();
+    let mut buf = [0u8; 32];
+    if bytes.len() > 32 {
+        return Err("commitment too large for 32-byte point".into());
+    }
+    buf[..bytes.len()].copy_from_slice(&bytes);
+    CompressedRistretto(buf)
+        .decompress()
+        .ok_or_else(|| format!("invalid compressed point for value {}", n))
 }
 
 fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
