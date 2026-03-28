@@ -868,6 +868,9 @@ fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
 
 #[cfg(test)]
 mod tests {
+    use num_bigint::RandBigInt;
+    use rand::thread_rng;
+
     use super::*;
 
     fn build_subsets<T: Clone>(
@@ -896,31 +899,42 @@ mod tests {
         result
     }
 
-    #[test]
-    fn test_full_flow() {
-        let deal_result = deal_ec(DealCurveParams {
-            secret: 25_u32.into(),
-            players: 5,
-            threshold: 3,
-        })
-        .unwrap();
+    fn gen_rand_biguint() -> BigUint {
+        let mut rng = thread_rng();
+        // RistrettoPoint work under q ~ 2^252
+        rng.gen_biguint(252)
+    }
 
-        // Test verify
-        for share in &deal_result.shares {
-            let verify_result = verify_ec(VerifyECParams {
-                commitments: deal_result.commitments.clone(),
-                share: share.clone(),
+    #[test]
+    fn test_full_flow_preset() {
+        let test_cases: Vec<BigUint> = vec![25_u32.into(), gen_rand_biguint()];
+
+        for secret in test_cases {
+            // test deal
+            let deal_result = deal_ec(DealCurveParams {
+                secret: secret.clone(),
+                players: 5,
+                threshold: 3,
             })
             .unwrap();
-            assert_eq!(verify_result.result, true);
-        }
 
-        // Test reconstruct
-        for subset in subsets(&deal_result.shares, 3) {
-            let reconstruct_result = reconstruct_ec(ReconstructEcParams {
-                shares: subset.iter().map(|s| (s.0.into(), s.1.clone())).collect(),
-            });
-            assert_eq!(reconstruct_result.unwrap().to_string(), "25");
+            // Test verify
+            for share in &deal_result.shares {
+                let verify_result = verify_ec(VerifyECParams {
+                    commitments: deal_result.commitments.clone(),
+                    share: share.clone(),
+                })
+                .unwrap();
+                assert_eq!(verify_result.result, true);
+            }
+
+            // Test reconstruct
+            for subset in subsets(&deal_result.shares, 3) {
+                let reconstruct_result = reconstruct_ec(ReconstructEcParams {
+                    shares: subset.iter().map(|s| (s.0.into(), s.1.clone())).collect(),
+                });
+                assert_eq!(reconstruct_result.unwrap(), secret);
+            }
         }
     }
 }
