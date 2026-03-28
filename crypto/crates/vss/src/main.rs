@@ -1,17 +1,11 @@
-use std::str::FromStr;
-
-use clap::{ColorChoice, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{
     RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, ristretto::CompressedRistretto,
     traits::Identity,
 };
-use num_bigint::{BigUint, RandBigInt};
-use rand::random;
+use num_bigint::BigUint;
+use num_traits::Num;
 use sha2::Sha512;
-
-// Curve25519 prime: 2^255 - 19
-const PRIME_25519_STR: &str =
-    "57896044618658097711785492504343953926634992332820282019728792003956564819949";
 
 #[derive(Parser, Debug)]
 #[command(name="vss", version, about, long_about=None)]
@@ -47,7 +41,7 @@ enum Commands {
     /// Generate shares for a secret
     Deal {
         /// Secret
-        #[arg(long, value_parser = BigUint::from_str)]
+        #[arg(long, value_parser = parse_biguint)]
         secret: BigUint,
 
         /// How many participants
@@ -72,7 +66,7 @@ enum Commands {
         pogh: Option<CliPogh>,
 
         /// VSS commitment values
-        #[arg(long, value_delimiter = ':', value_parser = BigUint::from_str)]
+        #[arg(long, value_delimiter = ':', value_parser = parse_biguint)]
         commitments: Vec<BigUint>,
 
         /// Share
@@ -85,7 +79,7 @@ enum Commands {
         shares: Vec<(BigUint, BigUint)>,
 
         /// Optional prime value
-        #[arg(long, short, value_parser = BigUint::from_str)]
+        #[arg(long, short, value_parser = parse_biguint)]
         prime: Option<BigUint>,
     },
 }
@@ -111,7 +105,7 @@ fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), St
         }
     };
 
-    let s = match BigUint::from_str(vals[1]) {
+    let s = match parse_biguint(vals[1]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -121,7 +115,7 @@ fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), St
         }
     };
 
-    let t = match BigUint::from_str(vals[2]) {
+    let t = match parse_biguint(vals[2]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -131,7 +125,7 @@ fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), St
         }
     };
 
-    return Ok((index, s, t));
+    Ok((index, s, t))
 }
 
 fn parse_reconstruct_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
@@ -140,7 +134,7 @@ fn parse_reconstruct_shares_param(val: &str) -> Result<(BigUint, BigUint), Strin
         return Err(format!("cannot parse share param: {:?}", val));
     }
 
-    let x = match BigUint::from_str(s[0]) {
+    let x = match parse_biguint(s[0]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -150,7 +144,7 @@ fn parse_reconstruct_shares_param(val: &str) -> Result<(BigUint, BigUint), Strin
         }
     };
 
-    let y = match BigUint::from_str(s[1]) {
+    let y = match parse_biguint(s[1]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -178,7 +172,7 @@ fn parse_pogh_param(input: &str) -> Result<CliPogh, String> {
         return Err(format!("params values is invalid: {:?}", input));
     }
 
-    let prime = match BigUint::from_str(vals[0]) {
+    let prime = match parse_biguint(vals[0]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -188,7 +182,7 @@ fn parse_pogh_param(input: &str) -> Result<CliPogh, String> {
         }
     };
 
-    let order = match BigUint::from_str(vals[1]) {
+    let order = match parse_biguint(vals[1]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -198,7 +192,7 @@ fn parse_pogh_param(input: &str) -> Result<CliPogh, String> {
         }
     };
 
-    let generator_g = match BigUint::from_str(vals[2]) {
+    let generator_g = match parse_biguint(vals[2]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -208,7 +202,7 @@ fn parse_pogh_param(input: &str) -> Result<CliPogh, String> {
         }
     };
 
-    let generator_h = match BigUint::from_str(vals[3]) {
+    let generator_h = match parse_biguint(vals[3]) {
         Ok(v) => v,
         Err(e) => {
             return Err(format!(
@@ -237,7 +231,7 @@ fn parse_debug_coeffs(input: &str) -> Result<(Vec<BigUint>, Vec<BigUint>), Strin
 
     let mut coeffs_f: Vec<BigUint> = vec![];
     for s in vals_coeffs_f {
-        match BigUint::from_str(s) {
+        match parse_biguint(s) {
             Ok(v) => coeffs_f.push(v),
             Err(e) => {
                 return Err(format!(
@@ -250,7 +244,7 @@ fn parse_debug_coeffs(input: &str) -> Result<(Vec<BigUint>, Vec<BigUint>), Strin
 
     let mut coeffs_g: Vec<BigUint> = vec![];
     for s in vals_coeffs_g {
-        match BigUint::from_str(s) {
+        match parse_biguint(s) {
             Ok(v) => coeffs_g.push(v),
             Err(e) => {
                 return Err(format!(
@@ -262,6 +256,14 @@ fn parse_debug_coeffs(input: &str) -> Result<(Vec<BigUint>, Vec<BigUint>), Strin
     }
 
     Ok((coeffs_f, coeffs_g))
+}
+
+fn parse_biguint(s: &str) -> Result<BigUint, String> {
+    if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
+    } else {
+        BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Debug)]
@@ -301,12 +303,12 @@ struct DealCurveResult {
 }
 
 fn generate_g() -> RistrettoPoint {
-    return RISTRETTO_BASEPOINT_POINT;
+    RISTRETTO_BASEPOINT_POINT
 }
 
 fn generate_h() -> RistrettoPoint {
     let msg = "VSS_pedersen_h_generator_v1";
-    return RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes());
+    RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes())
 }
 
 fn commit_custom(a: &BigUint, b: &BigUint, g: &BigUint, h: &BigUint, modulus: &BigUint) -> BigUint {
@@ -370,7 +372,7 @@ fn deal_custom(params: DealParams) -> Result<DealResult, String> {
         ));
     }
     // validate debug first free coeff
-    if &params.coeffs_a[0] != &params.secret {
+    if params.coeffs_a[0] != params.secret {
         return Err(format!(
             "debug coeffs first free coeff must equal secret {}, found {}",
             params.secret, params.coeffs_a[0]
@@ -406,10 +408,10 @@ fn deal_custom(params: DealParams) -> Result<DealResult, String> {
         shares.push((i, s, t));
     }
 
-    return Ok(DealResult {
+    Ok(DealResult {
         commitments,
         shares,
-    });
+    })
 }
 
 fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
@@ -422,11 +424,11 @@ fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
         ));
     }
 
-    let k: Scalar = biguint_to_scalar(&params.secret).or_else(|e| {
-        return Err(format!(
+    let k: Scalar = biguint_to_scalar(&params.secret).map_err(|e| {
+        format!(
             "cannot convert {:?} to scalar, error: {:?}",
             params.secret, e
-        ));
+        )
     })?;
 
     let mut csprng = rand::rngs::OsRng;
@@ -457,10 +459,10 @@ fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
         shares.push((i, s, t));
     }
 
-    return Ok(DealCurveResult {
+    Ok(DealCurveResult {
         commitments,
         shares,
-    });
+    })
 }
 
 #[derive(Debug)]
@@ -492,11 +494,11 @@ fn verify_custom(params: VerifyParams) -> Result<VerifyResult, String> {
     }
     verify_commitment_value %= &params.modulus;
 
-    return Ok(VerifyResult {
+    Ok(VerifyResult {
         result: verify_share_value == verify_commitment_value,
         verify_share_value,
         verify_commitment_value,
-    });
+    })
 }
 
 #[derive(Debug)]
@@ -645,7 +647,7 @@ fn reconstruct_ec(params: ReconstructEcParams) -> Result<BigUint, String> {
         |sum, (xi, yi)| {
             let li = shares
                 .iter()
-                .filter(|(xj, _)| &xj != &xi)
+                .filter(|(xj, _)| xj != xi)
                 .fold(Scalar::ONE, |prod, (xj, _)| {
                     prod * (-xj) * (xi - xj).invert()
                 });
@@ -837,12 +839,9 @@ fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, String> {
 
     // Defensive conversion to make sure
     // it works regardless the size
-    let r: [u8; 64] = b[..64].try_into().or_else(|e| {
-        Err(format!(
-            "cannot convert value {:?} to be scalar, error: {:?}",
-            n, e
-        ))
-    })?;
+    let r: [u8; 64] = b[..64]
+        .try_into()
+        .map_err(|e| format!("cannot convert value {:?} to be scalar, error: {:?}", n, e))?;
 
     Ok(Scalar::from_bytes_mod_order_wide(&r))
 }

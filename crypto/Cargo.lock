@@ -402,6 +402,7 @@ dependencies = [
  "clap",
  "curve25519-dalek",
  "num-bigint",
+ "num-traits",
  "rand",
  "sha2",
 ]
