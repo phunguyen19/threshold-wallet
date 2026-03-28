@@ -85,8 +85,8 @@ enum Commands {
         shares: Vec<(BigUint, BigUint)>,
 
         /// Optional prime value
-        #[arg(long, short, value_parser = BigUint::from_str, default_value = PRIME_25519_STR)]
-        prime: BigUint,
+        #[arg(long, short, value_parser = BigUint::from_str)]
+        prime: Option<BigUint>,
     },
 }
 
@@ -546,13 +546,7 @@ struct ReconstructParams {
     prime: BigUint,
 }
 
-struct ReconstructResult {
-    secret: BigUint,
-    prime: BigUint,
-    basis_l_vals: Vec<BigUint>,
-}
-
-fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
+fn reconstruct_custom(params: ReconstructParams) -> Result<BigUint, String> {
     if params.shares.len() < 2 {
         return Err("there must be more than 1 share".into());
     }
@@ -636,11 +630,32 @@ fn reconstruct(params: ReconstructParams) -> Result<ReconstructResult, String> {
         return Err("shares are not in the same polynomial".into());
     }
 
-    Ok(ReconstructResult {
-        secret: sec,
-        prime: params.prime,
-        basis_l_vals: l_vec,
-    })
+    Ok(sec)
+}
+
+struct ReconstructEcParams {
+    shares: Vec<(BigUint, BigUint)>,
+}
+
+fn reconstruct_ec(params: ReconstructEcParams) -> Result<BigUint, String> {
+    let mut shares: Vec<(Scalar, Scalar)> = vec![];
+    for s in params.shares {
+        let i = biguint_to_scalar(&s.0)?;
+        let v = biguint_to_scalar(&s.1)?;
+        shares.push((i, v));
+    }
+
+    Ok(scalar_to_biguint(&shares.iter().fold(
+        Scalar::ZERO,
+        |sum, (i, s)| {
+            let a = shares
+                .iter()
+                .filter(|share| &&share.0 != &i)
+                .fold(Scalar::ONE, |prod, share| prod * i * (share.0 - i).invert());
+
+            sum + a * s
+        },
+    )))
 }
 
 fn main() -> Result<(), String> {
@@ -700,34 +715,21 @@ fn main() -> Result<(), String> {
             Ok(())
         }
         Commands::Reconstruct { shares, prime } => {
-            let result = reconstruct(ReconstructParams {
-                shares: shares.clone(),
-                prime: prime.clone(),
-            })?;
+            let result = if let Some(prime) = prime {
+                reconstruct_custom(ReconstructParams {
+                    shares: shares.clone(),
+                    prime: prime.clone(),
+                })?
+            } else {
+                reconstruct_ec(ReconstructEcParams { shares })?
+            };
 
             let number_format = &args.number_format;
 
-            if args.verbose {
-                println!("Input: {:?} {:?}", shares, prime);
-                println!("share_points: {:?}", shares);
-                println!("l_vec: {:?}", result.basis_l_vals);
-            }
-
-            println!();
-            println!("Shamir's Secret Reconstruction ");
-            println!("───────────────────────────────");
-            println!("Prime: {}", number_format.format(&result.prime));
-            println!("Shares: {} provided", shares.len());
-            println!("───────────────────────────────");
-            println!();
-            println!("Input Shares:");
-            for s in &shares {
-                println!("  {}: {}", &s.0, number_format.format(&s.1));
-            }
             println!();
             println!("✓ Reconstructed Secret");
             println!("──────────────────────");
-            println!("Secret: {}", number_format.format(&result.secret));
+            println!("Secret: {}", number_format.format(&result));
             println!("──────────────────────");
 
             Ok(())
