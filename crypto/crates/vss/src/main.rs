@@ -645,15 +645,20 @@ fn reconstruct_ec(params: ReconstructEcParams) -> Result<BigUint, String> {
         shares.push((i, v));
     }
 
+    // for each (xi, yi):
+    //   li = product over (xj, _) where xj ≠ xi: (-xj) / (xi - xj)
+    //   sum += yi * li
     Ok(scalar_to_biguint(&shares.iter().fold(
         Scalar::ZERO,
-        |sum, (i, s)| {
-            let a = shares
+        |sum, (xi, yi)| {
+            let li = shares
                 .iter()
-                .filter(|share| &&share.0 != &i)
-                .fold(Scalar::ONE, |prod, share| prod * i * (share.0 - i).invert());
+                .filter(|(xj, _)| &xj != &xi)
+                .fold(Scalar::ONE, |prod, (xj, _)| {
+                    prod * (-xj) * (xi - xj).invert()
+                });
 
-            sum + a * s
+            sum + li * yi
         },
     )))
 }
