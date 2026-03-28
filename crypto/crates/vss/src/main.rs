@@ -937,4 +937,95 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_invalid_value_players_threshold() {
+        let test_cases: Vec<(usize, usize)> = vec![(0, 0), (1, 1), (2, 1), (5, 1), (5, 6)];
+        for t in test_cases {
+            let r = deal_ec(DealCurveParams {
+                secret: 25_u32.into(),
+                players: t.0,
+                threshold: t.1,
+            });
+            assert!(r.is_err() == true);
+        }
+    }
+
+    #[test]
+    fn test_each_deal_run_produces_different_result() {
+        let mut deal_results: Vec<DealCurveResult> = vec![];
+        for _ in 0..2 {
+            deal_results.push(
+                deal_ec(DealCurveParams {
+                    secret: 25_u32.into(),
+                    players: 5,
+                    threshold: 3,
+                })
+                .unwrap(),
+            );
+        }
+        for i in 0..=2 {
+            assert!(deal_results[0].commitments[i] != deal_results[1].commitments[i]);
+            assert!(deal_results[0].shares[i].0 == deal_results[1].shares[i].0);
+            assert!(deal_results[0].shares[i].1 != deal_results[1].shares[i].1);
+            assert!(deal_results[0].shares[i].2 != deal_results[1].shares[i].2);
+        }
+    }
+
+    #[test]
+    fn test_verify_fail() {
+        let mut deal_results: Vec<DealCurveResult> = vec![];
+        for _ in 0..2 {
+            deal_results.push(
+                deal_ec(DealCurveParams {
+                    secret: 25_u32.into(),
+                    players: 5,
+                    threshold: 3,
+                })
+                .unwrap(),
+            );
+        }
+        // Try to mismatch verify commitments shares
+        for i in 0..5 {
+            let verify_result = verify_ec(VerifyECParams {
+                commitments: deal_results[0].commitments.clone(),
+                share: deal_results[1].shares[i].clone(),
+            })
+            .unwrap();
+            assert_eq!(verify_result.result, false);
+        }
+    }
+
+    #[test]
+    fn test_reconstruct_incorrect_if_not_enough_k_1_shares() {
+        let test_cases: Vec<BigUint> = vec![25_u32.into(), gen_rand_biguint()];
+
+        for secret in test_cases {
+            // test deal
+            let deal_result = deal_ec(DealCurveParams {
+                secret: secret.clone(),
+                players: 5,
+                threshold: 3,
+            })
+            .unwrap();
+
+            // Test verify
+            for share in &deal_result.shares {
+                let verify_result = verify_ec(VerifyECParams {
+                    commitments: deal_result.commitments.clone(),
+                    share: share.clone(),
+                })
+                .unwrap();
+                assert_eq!(verify_result.result, true);
+            }
+
+            // Test reconstruct
+            for subset in subsets(&deal_result.shares, 2) {
+                let reconstruct_result = reconstruct_ec(ReconstructEcParams {
+                    shares: subset.iter().map(|s| (s.0.into(), s.1.clone())).collect(),
+                });
+                assert!(reconstruct_result.unwrap() != secret);
+            }
+        }
+    }
 }
