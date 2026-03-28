@@ -1,4 +1,4 @@
-use std::{array::TryFromSliceError, hash::Hash, str::FromStr};
+use std::str::FromStr;
 
 use clap::{ColorChoice, Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{
@@ -331,8 +331,6 @@ fn gen_share_ec(x: &Scalar, coeffs: &Vec<Scalar>) -> Scalar {
 }
 
 fn deal_custom(params: DealParams) -> Result<DealResult, String> {
-    println!("{:?}", params);
-
     // validate players is valid
     // validate threshold is valid and smaller than players
     if params.threshold < 2 || params.threshold > params.players {
@@ -415,8 +413,6 @@ fn deal_custom(params: DealParams) -> Result<DealResult, String> {
 }
 
 fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
-    println!("{:?}", params);
-
     // validate players is valid
     // validate threshold is valid and smaller than players
     if params.threshold < 2 || params.threshold > params.players {
@@ -484,8 +480,6 @@ struct VerifyResult {
 }
 
 fn verify_custom(params: VerifyParams) -> Result<VerifyResult, String> {
-    println!("{:?}", params);
-
     let verify_share_value = (params.generator_g.modpow(&params.share.1, &params.modulus)
         * params.generator_h.modpow(&params.share.2, &params.modulus))
         % &params.modulus;
@@ -514,8 +508,6 @@ struct VerifyECParams {
 // Verify share EC
 // E(s_i, t_i) = g*s + h*t = \sum_{j=0}^{k-1}{E_j*i^j}
 fn verify_ec(params: VerifyECParams) -> Result<VerifyResult, String> {
-    println!("verify_ec params: {:?}", params);
-
     let g = generate_g();
     let h = generate_h();
 
@@ -665,7 +657,9 @@ fn reconstruct_ec(params: ReconstructEcParams) -> Result<BigUint, String> {
 
 fn main() -> Result<(), String> {
     let args = Cli::parse();
-    println!("{:?}", args);
+    let fmt = &args.number_format;
+    let verbose = args.verbose;
+
     match args.command {
         Commands::Deal {
             secret,
@@ -674,8 +668,23 @@ fn main() -> Result<(), String> {
             pogh,
             debug_coeffs,
         } => {
-            if let Some(poghv) = pogh {
+            let (commitments, shares) = if let Some(poghv) = pogh {
                 if let Some(debug_coeffs_v) = debug_coeffs {
+                    if verbose {
+                        println!("secret:    {}", fmt.format(&secret));
+                        println!("players:   {}", players);
+                        println!("threshold: {}", threshold);
+                        println!("prime:     {}", fmt.format(&poghv.prime));
+                        println!("order:     {}", fmt.format(&poghv.order));
+                        println!("g:         {}", fmt.format(&poghv.generator_g));
+                        println!("h:         {}", fmt.format(&poghv.generator_h));
+                        for (i, c) in debug_coeffs_v.0.iter().enumerate() {
+                            println!("a[{}]: {}", i, fmt.format(c));
+                        }
+                        for (i, c) in debug_coeffs_v.1.iter().enumerate() {
+                            println!("b[{}]: {}", i, fmt.format(c));
+                        }
+                    }
                     let r = deal_custom(DealParams {
                         secret,
                         players,
@@ -686,17 +695,40 @@ fn main() -> Result<(), String> {
                         generator_h: poghv.generator_h,
                         coeffs_a: debug_coeffs_v.0,
                         coeffs_b: debug_coeffs_v.1,
-                    });
-                    println!("{:?}", r);
+                    })?;
+                    (r.commitments, r.shares)
+                } else {
+                    return Err("--debug-coeffs required when --pogh is set".into());
                 }
             } else {
+                if verbose {
+                    println!("secret:    {}", fmt.format(&secret));
+                    println!("players:   {}", players);
+                    println!("threshold: {}", threshold);
+                    println!("curve:     ristretto255");
+                }
                 let r = deal_ec(DealCurveParams {
                     secret,
                     players,
                     threshold,
-                });
-                println!("{:?}", r);
+                })?;
+                (r.commitments, r.shares)
+            };
+
+            println!();
+            println!("✓ Deal Complete");
+            println!("────────────────────────────────────────");
+            println!("Commitments ({}):", commitments.len());
+            for (i, c) in commitments.iter().enumerate() {
+                println!("  E[{}] = {}", i, fmt.format(c));
             }
+            println!();
+            println!("Shares ({}):", shares.len());
+            for (i, s, t) in &shares {
+                println!("  [{}]  s = {}  t = {}", i, fmt.format(s), fmt.format(t));
+            }
+            println!("────────────────────────────────────────");
+
             Ok(())
         }
         Commands::Verify {
@@ -704,22 +736,58 @@ fn main() -> Result<(), String> {
             commitments,
             share,
         } => {
-            if let Some(pogh) = pogh {
-                let r = verify_custom(VerifyParams {
+            if verbose {
+                println!("share index: {}", share.0);
+                println!("s:           {}", fmt.format(&share.1));
+                println!("t:           {}", fmt.format(&share.2));
+                println!("commitments ({}):", commitments.len());
+                for (i, c) in commitments.iter().enumerate() {
+                    println!("  E[{}] = {}", i, fmt.format(c));
+                }
+            }
+
+            let r = if let Some(pogh) = pogh {
+                verify_custom(VerifyParams {
                     generator_g: pogh.generator_g,
                     generator_h: pogh.generator_h,
                     commitments,
                     share,
                     modulus: pogh.prime,
-                });
-                println!("{:?}", r);
+                })?
             } else {
-                let r = verify_ec(VerifyECParams { commitments, share });
-                println!("{:?}", r)
+                verify_ec(VerifyECParams { commitments, share })?
+            };
+
+            println!();
+            if r.result {
+                println!("✓ Verification Passed");
+            } else {
+                println!("✗ Verification Failed");
             }
+            println!("────────────────────────────────────────");
+            if verbose {
+                println!(
+                    "  lhs (g·s + h·t):          {}",
+                    fmt.format(&r.verify_commitment_value)
+                );
+                println!(
+                    "  rhs (Σ Eⱼ·iʲ):            {}",
+                    fmt.format(&r.verify_share_value)
+                );
+            }
+            println!("  Result: {}", if r.result { "VALID" } else { "INVALID" });
+            println!("────────────────────────────────────────");
+
             Ok(())
         }
         Commands::Reconstruct { shares, prime } => {
+            if verbose {
+                println!("shares ({}):", shares.len());
+                for (x, y) in &shares {
+                    println!("  x = {}  y = {}", fmt.format(x), fmt.format(y));
+                }
+            }
+
             let result = if let Some(prime) = prime {
                 reconstruct_custom(ReconstructParams {
                     shares: shares.clone(),
@@ -729,13 +797,11 @@ fn main() -> Result<(), String> {
                 reconstruct_ec(ReconstructEcParams { shares })?
             };
 
-            let number_format = &args.number_format;
-
             println!();
             println!("✓ Reconstructed Secret");
-            println!("──────────────────────");
-            println!("Secret: {}", number_format.format(&result));
-            println!("──────────────────────");
+            println!("────────────────────────────────────────");
+            println!("  Secret: {}", fmt.format(&result));
+            println!("────────────────────────────────────────");
 
             Ok(())
         }
