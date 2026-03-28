@@ -865,3 +865,62 @@ fn biguint_to_ristretto_point(n: &BigUint) -> Result<RistrettoPoint, String> {
 fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
     BigUint::from_bytes_le(n.compress().as_bytes())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_subsets<T: Clone>(
+        items: &[T],
+        k: usize,
+        start: usize,
+        current: &mut Vec<T>,
+        result: &mut Vec<Vec<T>>,
+    ) {
+        if current.len() == k {
+            result.push(current.clone());
+            return;
+        }
+        for i in start..items.len() {
+            current.push(items[i].clone());
+            build_subsets(items, k, i + 1, current, result);
+            current.pop();
+        }
+    }
+
+    /// Generate all k-sized subsets of a slice
+    fn subsets<T: Clone>(items: &[T], k: usize) -> Vec<Vec<T>> {
+        let mut result = Vec::new();
+        let mut current = Vec::with_capacity(k);
+        build_subsets(items, k, 0, &mut current, &mut result);
+        result
+    }
+
+    #[test]
+    fn test_full_flow() {
+        let deal_result = deal_ec(DealCurveParams {
+            secret: 25_u32.into(),
+            players: 5,
+            threshold: 3,
+        })
+        .unwrap();
+
+        // Test verify
+        for share in &deal_result.shares {
+            let verify_result = verify_ec(VerifyECParams {
+                commitments: deal_result.commitments.clone(),
+                share: share.clone(),
+            })
+            .unwrap();
+            assert_eq!(verify_result.result, true);
+        }
+
+        // Test reconstruct
+        for subset in subsets(&deal_result.shares, 3) {
+            let reconstruct_result = reconstruct_ec(ReconstructEcParams {
+                shares: subset.iter().map(|s| (s.0.into(), s.1.clone())).collect(),
+            });
+            assert_eq!(reconstruct_result.unwrap().to_string(), "25");
+        }
+    }
+}
