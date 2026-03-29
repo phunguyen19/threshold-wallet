@@ -54,11 +54,11 @@ enum Commands {
     },
     Verify {
         /// VSS commitment values
-        #[arg(long, value_delimiter = ':', value_parser = parse_biguint)]
+        #[arg(long, short, value_delimiter = ':', value_parser = parse_biguint)]
         commitments: Vec<BigUint>,
 
         /// Share
-        #[arg(long, value_parser = parse_verify_share_param)]
+        #[arg(long, short, value_parser = parse_verify_share_param)]
         share: (usize, BigUint, BigUint),
     },
     Reconstruct {
