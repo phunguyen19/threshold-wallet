@@ -78,7 +78,7 @@ enum Commands {
 
 fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), String> {
     // split by :
-    let vals: Vec<&str> = input.split(":").collect();
+    let vals: Vec<&str> = input.split(':').collect();
     if vals.len() != 3 {
         return Err(format!(
             "share value must be in format index:s:t, receive: {:?}",
@@ -121,7 +121,7 @@ fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), St
 }
 
 fn parse_reconstruct_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
-    let s: Vec<&str> = val.split(":").collect();
+    let s: Vec<&str> = val.split(':').collect();
     if s.len() != 2 {
         return Err(format!("cannot parse share param: {:?}", val));
     }
@@ -532,10 +532,13 @@ mod tests {
             );
         }
         for i in 0..=2 {
-            assert!(deal_results[0].commitments[i] != deal_results[1].commitments[i]);
-            assert!(deal_results[0].shares[i].0 == deal_results[1].shares[i].0);
-            assert!(deal_results[0].shares[i].1 != deal_results[1].shares[i].1);
-            assert!(deal_results[0].shares[i].2 != deal_results[1].shares[i].2);
+            assert_ne!(
+                deal_results[0].commitments[i],
+                deal_results[1].commitments[i]
+            );
+            assert_eq!(deal_results[0].shares[i].0, deal_results[1].shares[i].0);
+            assert_ne!(deal_results[0].shares[i].1, deal_results[1].shares[i].1);
+            assert_ne!(deal_results[0].shares[i].2, deal_results[1].shares[i].2);
         }
     }
 
