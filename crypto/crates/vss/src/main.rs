@@ -403,9 +403,7 @@ fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, String> {
 
     // Defensive conversion to make sure
     // it works regardless the size
-    let r: [u8; 64] = b[..64]
-        .try_into()
-        .map_err(|e| format!("cannot convert value {:?} to be scalar, error: {:?}", n, e))?;
+    let r: [u8; 64] = b[..64].try_into().expect("always 64 bytes after resize");
 
     Ok(Scalar::from_bytes_mod_order_wide(&r))
 }
@@ -596,7 +594,7 @@ mod tests {
                 });
 
                 // assert the recovery value is not the original secret
-                assert!(reconstruct_result.unwrap() != secret);
+                assert_ne!(reconstruct_result.unwrap(), secret);
             }
         }
     }
