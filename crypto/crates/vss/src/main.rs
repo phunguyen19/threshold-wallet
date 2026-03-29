@@ -173,8 +173,8 @@ struct DealCurveResult {
 }
 
 // Commitment: E_j = g^a_j * h^b_j  (in EC: a_j*G + b_j*H)
-fn commit_ec(a: &Scalar, b: &Scalar, g: &RistrettoPoint, h: &RistrettoPoint) -> RistrettoPoint {
-    g * a + h * b
+fn commit_ec(a: &Scalar, b: &Scalar) -> RistrettoPoint {
+    G * a + *H * b
 }
 
 fn gen_share_ec(x: &Scalar, coeffs: &[Scalar]) -> Scalar {
@@ -214,8 +214,6 @@ fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
         commitments.push(ristretto_point_to_biguint(&commit_ec(
             &coeffs_a[i],
             &coeffs_b[i],
-            &G,
-            &H,
         )));
     }
 
@@ -561,7 +559,7 @@ mod tests {
                 share: deal_results[1].shares[i].clone(),
             })
             .unwrap();
-            assert_eq!(verify_result.result, false);
+            assert!(!verify_result.result);
         }
     }
 
@@ -585,7 +583,7 @@ mod tests {
                     share: share.clone(),
                 })
                 .unwrap();
-                assert_eq!(verify_result.result, true);
+                assert!(verify_result.result);
             }
 
             // Test reconstruct
