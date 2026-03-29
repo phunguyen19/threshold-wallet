@@ -374,7 +374,7 @@ fn main() -> Result<(), String> {
                 }
             }
 
-            let result = reconstruct_ec(ReconstructEcParams { shares })?;
+            let result = reconstruct_ec(ReconstructEcParams { shares });
 
             println!();
             println!("✓ Reconstructed Secret");
@@ -393,8 +393,6 @@ fn biguint_to_scalar(n: &BigUint) -> Scalar {
     let mut b = n.to_bytes_le();
     b.resize(64, 0u8);
 
-    // Defensive conversion to make sure
-    // it works regardless the size
     let r: [u8; 64] = b[..64].try_into().expect("always 64 bytes after resize");
 
     Scalar::from_bytes_mod_order_wide(&r)
@@ -489,7 +487,7 @@ mod tests {
                     let reconstruct_result = reconstruct_ec(ReconstructEcParams {
                         shares: subset.iter().map(|s| (s.0.into(), s.1.clone())).collect(),
                     });
-                    assert_eq!(reconstruct_result.unwrap(), secret);
+                    assert_eq!(reconstruct_result, secret);
                 }
             }
         }
@@ -586,7 +584,7 @@ mod tests {
                 });
 
                 // assert the recovery value is not the original secret
-                assert_ne!(reconstruct_result.unwrap(), secret);
+                assert_ne!(reconstruct_result, secret);
             }
         }
     }
