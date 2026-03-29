@@ -191,12 +191,7 @@ fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
         ));
     }
 
-    let k: Scalar = biguint_to_scalar(&params.secret).map_err(|e| {
-        format!(
-            "cannot convert {:?} to scalar, error: {:?}",
-            params.secret, e
-        )
-    })?;
+    let k: Scalar = biguint_to_scalar(&params.secret);
 
     let mut csprng = rand::rngs::OsRng;
     let t: Scalar = Scalar::random(&mut csprng);
@@ -246,19 +241,19 @@ struct VerifyECParams {
 // Verify share EC
 // E(s_i, t_i) = g*s + h*t = \sum_{j=0}^{k-1}{E_j*i^j}
 fn verify_ec(params: VerifyECParams) -> Result<VerifyResult, String> {
-    let si: Scalar = biguint_to_scalar(&params.share.1)?;
-    let ti: Scalar = biguint_to_scalar(&params.share.2)?;
+    let si: Scalar = biguint_to_scalar(&params.share.1);
+    let ti: Scalar = biguint_to_scalar(&params.share.2);
 
     let lhs = G * si + *H * ti;
 
     // rhs sum(ej * i^j)
     let mut rhs = RistrettoPoint::identity(); // (0,0)
     let i = Scalar::from(params.share.0 as u64);
-    let mut ipowj = Scalar::ONE; // start with i^0 = 1
+    let mut i_pow_j = Scalar::ONE; // start with i^0 = 1
     for ej in &params.commitments {
-        let ejscalar = biguint_to_ristretto_point(ej)?;
-        rhs += ejscalar * ipowj;
-        ipowj *= i;
+        let ej_point = biguint_to_ristretto_point(ej)?;
+        rhs += ej_point * i_pow_j;
+        i_pow_j *= i;
     }
 
     Ok(VerifyResult {
@@ -275,8 +270,8 @@ struct ReconstructEcParams {
 fn reconstruct_ec(params: ReconstructEcParams) -> Result<BigUint, String> {
     let mut shares: Vec<(Scalar, Scalar)> = vec![];
     for s in params.shares {
-        let i = biguint_to_scalar(&s.0)?;
-        let v = biguint_to_scalar(&s.1)?;
+        let i = biguint_to_scalar(&s.0);
+        let v = biguint_to_scalar(&s.1);
         shares.push((i, v));
     }
 
@@ -397,7 +392,7 @@ fn main() -> Result<(), String> {
 
 /// WARNING: if n > 252-bit value (l), function will perform n mod l
 /// because Ristretto255 works under l ~ 252-bit value
-fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, String> {
+fn biguint_to_scalar(n: &BigUint) -> Scalar {
     let mut b = n.to_bytes_le();
     b.resize(64, 0u8);
 
@@ -405,7 +400,7 @@ fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, String> {
     // it works regardless the size
     let r: [u8; 64] = b[..64].try_into().expect("always 64 bytes after resize");
 
-    Ok(Scalar::from_bytes_mod_order_wide(&r))
+    Scalar::from_bytes_mod_order_wide(&r)
 }
 
 fn scalar_to_biguint(n: &Scalar) -> BigUint {
