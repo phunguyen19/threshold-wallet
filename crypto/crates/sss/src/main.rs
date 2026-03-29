@@ -8,7 +8,7 @@ const PRIME_25519_STR: &str =
     "57896044618658097711785492504343953926634992332820282019728792003956564819949";
 
 #[derive(Parser, Debug)]
-#[command(name="shamir", version, about, long_about = None)]
+#[command(name="sss", version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
