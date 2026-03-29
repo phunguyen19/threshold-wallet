@@ -77,7 +77,6 @@ enum Commands {
 }
 
 fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), String> {
-    // split by :
     let vals: Vec<&str> = input.split(':').collect();
     if vals.len() != 3 {
         return Err(format!(
@@ -263,11 +262,12 @@ fn verify_ec(params: VerifyECParams) -> Result<VerifyResult, String> {
     })
 }
 
+#[derive(Debug)]
 struct ReconstructEcParams {
     shares: Vec<(BigUint, BigUint)>,
 }
 
-fn reconstruct_ec(params: ReconstructEcParams) -> Result<BigUint, String> {
+fn reconstruct_ec(params: ReconstructEcParams) -> BigUint {
     let mut shares: Vec<(Scalar, Scalar)> = vec![];
     for s in params.shares {
         let i = biguint_to_scalar(&s.0);
@@ -278,19 +278,16 @@ fn reconstruct_ec(params: ReconstructEcParams) -> Result<BigUint, String> {
     // for each (xi, yi):
     //   li = product over (xj, _) where xj ≠ xi: (-xj) / (xi - xj)
     //   sum += yi * li
-    Ok(scalar_to_biguint(&shares.iter().fold(
-        Scalar::ZERO,
-        |sum, (xi, yi)| {
-            let li = shares
-                .iter()
-                .filter(|(xj, _)| xj != xi)
-                .fold(Scalar::ONE, |prod, (xj, _)| {
-                    prod * (-xj) * (xi - xj).invert()
-                });
+    scalar_to_biguint(&shares.iter().fold(Scalar::ZERO, |sum, (xi, yi)| {
+        let li = shares
+            .iter()
+            .filter(|(xj, _)| xj != xi)
+            .fold(Scalar::ONE, |prod, (xj, _)| {
+                prod * (-xj) * (xi - xj).invert()
+            });
 
-            sum + li * yi
-        },
-    )))
+        sum + li * yi
+    }))
 }
 
 fn main() -> Result<(), String> {
