@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{
     RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, ristretto::CompressedRistretto,
@@ -6,6 +8,12 @@ use curve25519_dalek::{
 use num_bigint::BigUint;
 use num_traits::Num;
 use sha2::Sha512;
+
+static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
+static H: LazyLock<RistrettoPoint> = LazyLock::new(|| {
+    let msg = "VSS_pedersen_h_generator_v1";
+    RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes())
+});
 
 #[derive(Parser, Debug)]
 #[command(name="vss", version, about, long_about=None)]
@@ -164,21 +172,12 @@ struct DealCurveResult {
     shares: Vec<(usize, BigUint, BigUint)>,
 }
 
-fn generate_g() -> RistrettoPoint {
-    RISTRETTO_BASEPOINT_POINT
-}
-
-fn generate_h() -> RistrettoPoint {
-    let msg = "VSS_pedersen_h_generator_v1";
-    RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes())
-}
-
 // Commitment: E_j = g^a_j * h^b_j  (in EC: a_j*G + b_j*H)
 fn commit_ec(a: &Scalar, b: &Scalar, g: &RistrettoPoint, h: &RistrettoPoint) -> RistrettoPoint {
     g * a + h * b
 }
 
-fn gen_share_ec(x: &Scalar, coeffs: &Vec<Scalar>) -> Scalar {
+fn gen_share_ec(x: &Scalar, coeffs: &[Scalar]) -> Scalar {
     coeffs.iter().rev().fold(Scalar::ZERO, |acc, c| acc * x + c)
 }
 
@@ -215,16 +214,16 @@ fn deal_ec(params: DealCurveParams) -> Result<DealCurveResult, String> {
         commitments.push(ristretto_point_to_biguint(&commit_ec(
             &coeffs_a[i],
             &coeffs_b[i],
-            &generate_g(),
-            &generate_h(),
+            &G,
+            &H,
         )));
     }
 
     let mut shares: Vec<(usize, BigUint, BigUint)> = vec![];
     for i in 1..=params.players {
-        let s = scalar_to_biguint(&gen_share_ec(&Scalar::from(i as u8), &coeffs_a));
-        let t = scalar_to_biguint(&gen_share_ec(&Scalar::from(i as u8), &coeffs_b));
-        shares.push((i, s, t));
+        let share_s = scalar_to_biguint(&gen_share_ec(&Scalar::from(i as u64), &coeffs_a));
+        let share_t = scalar_to_biguint(&gen_share_ec(&Scalar::from(i as u64), &coeffs_b));
+        shares.push((i, share_s, share_t));
     }
 
     Ok(DealCurveResult {
@@ -249,13 +248,10 @@ struct VerifyECParams {
 // Verify share EC
 // E(s_i, t_i) = g*s + h*t = \sum_{j=0}^{k-1}{E_j*i^j}
 fn verify_ec(params: VerifyECParams) -> Result<VerifyResult, String> {
-    let g = generate_g();
-    let h = generate_h();
-
     let si: Scalar = biguint_to_scalar(&params.share.1)?;
     let ti: Scalar = biguint_to_scalar(&params.share.2)?;
 
-    let lhs = g * si + h * ti;
+    let lhs = G * si + *H * ti;
 
     // rhs sum(ej * i^j)
     let mut rhs = RistrettoPoint::identity(); // (0,0)
@@ -401,6 +397,8 @@ fn main() -> Result<(), String> {
     }
 }
 
+/// WARNING: if n > 252-bit value (l), function will perform n mod l
+/// because Ristretto255 works under l ~ 252-bit value
 fn biguint_to_scalar(n: &BigUint) -> Result<Scalar, String> {
     let mut b = n.to_bytes_le();
     b.resize(64, 0u8);
@@ -495,7 +493,7 @@ mod tests {
                         share: share.clone(),
                     })
                     .unwrap();
-                    assert_eq!(verify_result.result, true);
+                    assert!(verify_result.result);
                 }
 
                 // Test reconstruct
@@ -518,7 +516,7 @@ mod tests {
                 players: t.0,
                 threshold: t.1,
             });
-            assert!(r.is_err() == true);
+            assert!(r.is_err());
         }
     }
 
@@ -568,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reconstruct_incorrect_if_not_enough_k_1_shares() {
+    fn test_reconstruct_incorrect_with_insufficient_shares() {
         let test_cases: Vec<BigUint> = vec![25_u32.into(), gen_rand_biguint()];
 
         for secret in test_cases {
@@ -595,6 +593,8 @@ mod tests {
                 let reconstruct_result = reconstruct_ec(ReconstructEcParams {
                     shares: subset.iter().map(|s| (s.0.into(), s.1.clone())).collect(),
                 });
+
+                // assert the recovery value is not the original secret
                 assert!(reconstruct_result.unwrap() != secret);
             }
         }
