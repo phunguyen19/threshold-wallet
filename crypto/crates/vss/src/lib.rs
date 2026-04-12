@@ -26,10 +26,6 @@ pub struct DealResult {
     pub commitments: Vec<BigUint>,
     // (i, s_i, t_i)
     pub shares: Vec<(usize, BigUint, BigUint)>,
-    // coeffs a
-    pub coeffs_a: Vec<BigUint>,
-    // coeffs b
-    pub coeffs_b: Vec<BigUint>,
 }
 
 // Commitment: E_j = g^a_j * h^b_j  (in EC: a_j*G + b_j*H)
@@ -82,8 +78,6 @@ pub fn deal(params: DealParams) -> Result<DealResult, String> {
     Ok(DealResult {
         commitments,
         shares,
-        coeffs_a: coeffs_a.iter().map(|v| scalar_to_biguint(&v)).collect(),
-        coeffs_b: coeffs_b.iter().map(|v| scalar_to_biguint(&v)).collect(),
     })
 }
 
@@ -260,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_deal_invalid_value_players_threshold() {
+    fn test_invalid_value_players_threshold() {
         let test_cases: Vec<(usize, usize)> = vec![(0, 0), (1, 1), (2, 1), (5, 1), (5, 6)];
         for t in test_cases {
             let r = deal(DealParams {
@@ -273,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_deal_each_deal_run_produces_different_result() {
+    fn test_each_deal_run_produces_different_result() {
         let mut deal_results: Vec<DealResult> = vec![];
         for _ in 0..2 {
             deal_results.push(
