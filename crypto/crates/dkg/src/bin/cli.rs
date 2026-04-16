@@ -1,26 +1,7 @@
-use std::collections::HashMap;
-use std::error::Error;
-use std::fs;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::BufReader;
-use std::io::BufWriter;
-use std::io::Write;
-use std::path::Path;
-
 use clap::{Parser, Subcommand, ValueEnum};
-use curve25519_dalek::Scalar;
-use dkg::biguint_to_hex;
-use dkg::biguint_to_scalar;
-use dkg::feldman_commitments;
-use dkg::gen_rand_biguint;
-use dkg::hex_to_biguint;
-use dkg::scalar_to_biguint;
+use curve25519_dalek::{RistrettoPoint, Scalar, ristretto::CompressedRistretto};
 use num_bigint::BigUint;
 use num_traits::Num;
-use serde::Deserialize;
-use serde::Serialize;
-use vss::VerifyParams;
 
 #[derive(Parser, Debug)]
 #[command(name = "dkg", version, about, long_about = None)]
@@ -53,40 +34,126 @@ impl NumberFormat {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Generate commitments and shares for DKG
+    /// Generate shares for a secret
     GenerateShares {
-        /// Participant ID
-        #[arg(long)]
-        participant_id: usize,
+        /// Secret
+        #[arg(long, value_parser = parse_biguint)]
+        secret: BigUint,
 
         /// How many participants
         #[arg(long)]
-        participants: usize,
+        players: usize,
 
-        /// Minimal number
+        /// Minimal number of shares needed to reconstruct the secret
         #[arg(long)]
         threshold: usize,
     },
-    /// Read participant received file and verify the shares and commitments
-    /// received from each of other participants
-    VerifyPedersen {
-        /// Participant ID that will be read data from
-        #[arg(long, short)]
-        participant_id: usize,
+    VerifyShares {
+        /// VSS commitment values
+        #[arg(long, short, value_delimiter = ':', value_parser = parse_biguint)]
+        commitments: Vec<BigUint>,
 
-        /// How many participants
-        #[arg(long)]
-        participants: usize,
+        /// Share
+        #[arg(long, short, value_parser = parse_verify_share_param)]
+        share: (usize, BigUint, BigUint),
     },
     /// Derive key share of each play from received shares by other players.
     /// x_i = sum(s_ji)
     DeriveKeyShare {
-        #[arg(long, short, value_delimiter = ':', value_parser = cli_parse_biguint)]
+        #[arg(long, short, value_delimiter = ':', value_parser = parse_biguint)]
         shares: Vec<BigUint>,
     },
+    /// Generate Feldman Commitments and broadcast to all players
+    /// A_ik = g^a_ik (for k = 0,...t of coeff-th of polynomial f)
+    FeldmanCommitments {},
     ///
     VerifyFeldman {},
+    ReconstructShare {
+        /// List of shares for reconstruct the secret
+        #[arg(long, short, value_parser = parse_reconstruct_shares_param)]
+        shares: Vec<(BigUint, BigUint)>,
+    },
     ComputePublicKey {},
+}
+
+fn parse_verify_share_param(input: &str) -> Result<(usize, BigUint, BigUint), String> {
+    let vals: Vec<&str> = input.split(':').collect();
+    if vals.len() != 3 {
+        return Err(format!(
+            "share value must be in format index:s:t, receive: {:?}",
+            input
+        ));
+    }
+
+    // parse each value and return proper error
+    let index = match vals[0].parse::<usize>() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse index value {}, error: {:?}",
+                vals[0], e,
+            ));
+        }
+    };
+
+    let s = match parse_biguint(vals[1]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse s={} of share={:?} error: {:?}",
+                vals[1], input, e
+            ));
+        }
+    };
+
+    let t = match parse_biguint(vals[2]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse t={} of share={:?} error: {:?}",
+                vals[2], input, e
+            ));
+        }
+    };
+
+    Ok((index, s, t))
+}
+
+fn parse_reconstruct_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
+    let s: Vec<&str> = val.split(':').collect();
+    if s.len() != 2 {
+        return Err(format!("cannot parse share param: {:?}", val));
+    }
+
+    let x = match parse_biguint(s[0]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse x={} of share={:?} error: {:?}",
+                s[0], val, e
+            ));
+        }
+    };
+
+    let y = match parse_biguint(s[1]) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(format!(
+                "cannot parse y={} of share={:?} error: {:?}",
+                s[1], val, e
+            ));
+        }
+    };
+
+    Ok((x, y))
+}
+
+fn parse_biguint(s: &str) -> Result<BigUint, String> {
+    if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
+    } else {
+        BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Debug)]
@@ -99,275 +166,7 @@ struct DeriveKeyShareResult {
     result: Scalar,
 }
 
-struct GenerateShareParams {
-    participant_id: usize,
-    participants: usize,
-    threshold: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ParticipantGenerated {
-    id: usize,
-    pedersen_commitments: Vec<String>,
-    feldman_commitments: Vec<String>,
-    shares_to: HashMap<String, ParticipantShare>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ParticipantShare {
-    s: String,
-    u: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ParticipantReceived {
-    pedersen_commitments: HashMap<String, Vec<String>>,
-    feldman_commitments: HashMap<String, Vec<String>>,
-    shares_from: HashMap<String, ParticipantShare>,
-}
-
-struct ParticipantFiles {
-    generated_filepath: String,
-    received_filepath: String,
-}
-
-impl ParticipantFiles {
-    fn new(id: usize) -> Self {
-        ParticipantFiles {
-            generated_filepath: format!("output/participant-{}/generated.json", id),
-            received_filepath: format!("output/participant-{}/received.json", id),
-        }
-    }
-
-    fn write_generated(
-        &self,
-        participant_generated: ParticipantGenerated,
-    ) -> Result<(), Box<dyn Error>> {
-        let path = Path::new(self.generated_filepath.as_str());
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let file = File::create(path)?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &participant_generated)?;
-        Ok(())
-    }
-
-    fn read_generated(&self) -> Result<ParticipantGenerated, Box<dyn Error>> {
-        let file = File::open(&self.generated_filepath)?;
-        let reader = BufReader::new(file);
-        let participant: ParticipantGenerated = serde_json::from_reader(reader)?;
-        Ok(participant)
-    }
-
-    fn ensure_received_file_exists(&self) -> Result<File, Box<dyn Error>> {
-        // ensure parent dir is created
-        let path = Path::new(self.received_filepath.as_str());
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // create file for write
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true) // Create if missing; do nothing if exists
-            .open(self.received_filepath.as_str())?;
-
-        // write default data if file is new created
-        let metadata = file.metadata()?;
-        if metadata.len() == 0 {
-            let default = ParticipantReceived {
-                pedersen_commitments: HashMap::new(),
-                feldman_commitments: HashMap::new(),
-                shares_from: HashMap::new(),
-            };
-            let json_data = serde_json::to_string_pretty(&default)?;
-            file.write_all(json_data.as_bytes())?;
-        }
-
-        Ok(file)
-    }
-
-    fn append_received(
-        &self,
-        from_participant_id: String,
-        pedersent_commitments: Vec<String>,
-        feldman_commitments: Vec<String>,
-        shares: ParticipantShare,
-    ) -> Result<(), Box<dyn Error>> {
-        // ensure file is created
-        self.ensure_received_file_exists()?;
-
-        // read received to append data
-        let mut result = self.read_received()?;
-
-        // append/override data
-        result
-            .shares_from
-            .insert(from_participant_id.clone(), shares);
-        result
-            .pedersen_commitments
-            .insert(from_participant_id.clone(), pedersent_commitments);
-        result
-            .feldman_commitments
-            .insert(from_participant_id.clone(), feldman_commitments);
-
-        // overwrite with new data
-        let file = File::create(self.received_filepath.to_string())?; // File::create also truncates
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &result)?;
-        Ok(())
-    }
-
-    fn read_received(&self) -> Result<ParticipantReceived, Box<dyn Error>> {
-        let file = File::open(&self.received_filepath)?;
-        let reader = BufReader::new(file);
-        let result: ParticipantReceived = serde_json::from_reader(reader)?;
-        Ok(result)
-    }
-}
-
-fn cli_parse_biguint(s: &str) -> Result<BigUint, String> {
-    if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
-    } else {
-        BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
-    }
-}
-
-fn command_handler_generate_shares(params: GenerateShareParams) -> Result<(), String> {
-    if params.participant_id < 1 || params.participant_id > params.participants {
-        return Err(format!("participant_id is not valid"));
-    }
-
-    let random_secret = gen_rand_biguint();
-
-    let pedersen_deal_result = vss::deal(vss::DealParams {
-        secret: random_secret,
-        players: params.participants,
-        threshold: params.threshold,
-    })?;
-
-    // Feldman commitments
-    let feldman_commitments = feldman_commitments(pedersen_deal_result.coeffs_a);
-
-    let participant_files = ParticipantFiles::new(params.participant_id);
-
-    let mut shares_hashmap: HashMap<String, ParticipantShare> = HashMap::new();
-    for share in pedersen_deal_result.shares {
-        shares_hashmap.insert(
-            share.0.to_string(),
-            ParticipantShare {
-                s: biguint_to_hex(&share.1),
-                u: biguint_to_hex(&share.2),
-            },
-        );
-    }
-
-    for i in 1..=params.participants {
-        let participant_received_files = ParticipantFiles::new(i);
-        let received_share = shares_hashmap.get(&i.to_string()).cloned().unwrap();
-        participant_received_files
-            .append_received(
-                params.participant_id.to_string(),
-                pedersen_deal_result
-                    .commitments
-                    .iter()
-                    .map(|v| biguint_to_hex(&v))
-                    .collect(),
-                feldman_commitments
-                    .iter()
-                    .map(|v| biguint_to_hex(&v))
-                    .collect(),
-                received_share,
-            )
-            .unwrap();
-    }
-
-    participant_files
-        .write_generated(ParticipantGenerated {
-            id: params.participant_id,
-            pedersen_commitments: pedersen_deal_result
-                .commitments
-                .iter()
-                .map(|v| biguint_to_hex(&v))
-                .collect(),
-            feldman_commitments: feldman_commitments
-                .iter()
-                .map(|v| biguint_to_hex(&v))
-                .collect(),
-            shares_to: shares_hashmap,
-        })
-        .expect("write generated result fail");
-
-    println!("{:?}", participant_files.read_generated());
-
-    Ok(())
-}
-
-fn command_handler_verify_pedersen(
-    participant_id: usize,
-    participants: usize,
-) -> Result<(), String> {
-    let files = ParticipantFiles::new(participant_id);
-    let received_info = files
-        .read_received()
-        .or_else(|err| Err(format!("cannot read participant file, error: {}", err)))?;
-
-    if received_info.pedersen_commitments.len() != participants
-        || received_info.shares_from.len() != participants
-    {
-        return Err("have not received data of all participants".into());
-    }
-
-    // verify each received share with corresponding pedersen commitments
-    for p_id in 1..=participants {
-        // get share received from pariticipant p_id
-        let share: (usize, BigUint, BigUint);
-        if let Some(s) = received_info.shares_from.get(&p_id.to_string()).cloned() {
-            share = (participant_id, hex_to_biguint(&s.s)?, hex_to_biguint(&s.u)?);
-        } else {
-            return Err(format!(
-                "cannot load share of pariticipant {} from received data of participant {}",
-                p_id, participant_id
-            ));
-        }
-
-        // get corresponding received from pariticipant p_id
-        let mut pedersen_commitments: Vec<BigUint> = vec![];
-        if let Some(s) = received_info
-            .pedersen_commitments
-            .get(&p_id.to_string())
-            .cloned()
-        {
-            for c in s {
-                pedersen_commitments.push(hex_to_biguint(&c.as_str())?);
-            }
-        } else {
-            return Err(format!(
-                "cannot load Pedersen commitments of pariticipant {} from received data of participant {}",
-                p_id, participant_id
-            ));
-        }
-
-        let verify_result = vss::verify(VerifyParams {
-            commitments: pedersen_commitments,
-            share: share,
-        })?;
-
-        println!(
-            "Participant: {} , Result {}, Commit Value: {}, Share Value: {}",
-            p_id,
-            verify_result.result,
-            verify_result.verify_commitment_value,
-            verify_result.verify_share_value
-        );
-    }
-
-    Ok(())
-}
-
-fn command_handler_derive_key_share(params: DeriveKeyShareParams) -> DeriveKeyShareResult {
+fn derive_key_share(params: DeriveKeyShareParams) -> DeriveKeyShareResult {
     DeriveKeyShareResult {
         result: params
             .shares
@@ -379,27 +178,83 @@ fn command_handler_derive_key_share(params: DeriveKeyShareParams) -> DeriveKeySh
 fn main() -> Result<(), String> {
     let args = Cli::parse();
     let fmt = &args.number_format;
-    let _verbose = args.verbose;
+    let verbose = args.verbose;
 
     match args.command {
         Commands::GenerateShares {
-            participant_id,
-            participants,
+            secret,
+            players,
             threshold,
-        } => command_handler_generate_shares(GenerateShareParams {
-            participant_id,
-            participants,
-            threshold,
-        }),
-        Commands::VerifyPedersen {
-            participant_id,
-            participants,
-        } => command_handler_verify_pedersen(participant_id, participants),
+        } => {
+            if verbose {
+                println!("secret:    {}", fmt.format(&secret));
+                println!("players:   {}", players);
+                println!("threshold: {}", threshold);
+                println!("curve:     ristretto255");
+            }
+            let r = vss::deal(vss::DealParams {
+                secret,
+                players,
+                threshold,
+            })?;
+
+            let (commitments, shares) = (r.commitments, r.shares);
+
+            println!();
+            println!("✓ Deal Complete");
+            println!("────────────────────────────────────────");
+            println!("Commitments ({}):", commitments.len());
+            for (i, c) in commitments.iter().enumerate() {
+                println!("  E[{}] = {}", i, fmt.format(c));
+            }
+            println!();
+            println!("Shares ({}):", shares.len());
+            for (i, s, t) in &shares {
+                println!("  [{}]  s = {}  t = {}", i, fmt.format(s), fmt.format(t));
+            }
+            println!("────────────────────────────────────────");
+
+            Ok(())
+        }
+        Commands::VerifyShares { commitments, share } => {
+            if verbose {
+                println!("share index: {}", share.0);
+                println!("s:           {}", fmt.format(&share.1));
+                println!("t:           {}", fmt.format(&share.2));
+                println!("commitments ({}):", commitments.len());
+                for (i, c) in commitments.iter().enumerate() {
+                    println!("  E[{}] = {}", i, fmt.format(c));
+                }
+            }
+
+            let r = vss::verify(vss::VerifyParams { commitments, share })?;
+
+            println!();
+            if r.result {
+                println!("✓ Verification Passed");
+            } else {
+                println!("✗ Verification Failed");
+            }
+            println!("────────────────────────────────────────");
+            if verbose {
+                println!(
+                    "  lhs (g·s + h·t):          {}",
+                    fmt.format(&r.verify_commitment_value)
+                );
+                println!(
+                    "  rhs (Σ Eⱼ·iʲ):            {}",
+                    fmt.format(&r.verify_share_value)
+                );
+            }
+            println!("  Result: {}", if r.result { "VALID" } else { "INVALID" });
+            println!("────────────────────────────────────────");
+
+            Ok(())
+        }
         Commands::DeriveKeyShare { shares } => {
-            let DeriveKeyShareResult { result: s } =
-                command_handler_derive_key_share(DeriveKeyShareParams {
-                    shares: shares.iter().map(|s| biguint_to_scalar(s)).collect(),
-                });
+            let DeriveKeyShareResult { result: s } = derive_key_share(DeriveKeyShareParams {
+                shares: shares.iter().map(|s| biguint_to_scalar(s)).collect(),
+            });
 
             println!("Derived Key Share");
             println!("-------------------------");
@@ -407,11 +262,101 @@ fn main() -> Result<(), String> {
 
             Ok(())
         }
+        Commands::FeldmanCommitments {} => {
+            todo!("to be implemented")
+        }
         Commands::VerifyFeldman {} => {
             todo!("to be implemented")
+        }
+        Commands::ReconstructShare { shares } => {
+            if verbose {
+                println!("shares ({}):", shares.len());
+                for (x, y) in &shares {
+                    println!("  x = {}  y = {}", fmt.format(x), fmt.format(y));
+                }
+            }
+
+            let result = vss::reconstruct(vss::ReconstructParams { shares });
+
+            println!();
+            println!("✓ Reconstructed Secret");
+            println!("────────────────────────────────────────");
+            println!("  Secret: {}", fmt.format(&result));
+            println!("────────────────────────────────────────");
+
+            Ok(())
         }
         Commands::ComputePublicKey {} => {
             todo!("to be implemented")
         }
+    }
+}
+
+/// WARNING: if n > 252-bit value (l), function will perform n mod l
+/// because Ristretto255 works under l ~ 252-bit value
+fn biguint_to_scalar(n: &BigUint) -> Scalar {
+    let mut b = n.to_bytes_le();
+    b.resize(64, 0u8);
+
+    let r: [u8; 64] = b[..64].try_into().expect("always 64 bytes after resize");
+
+    Scalar::from_bytes_mod_order_wide(&r)
+}
+
+fn scalar_to_biguint(n: &Scalar) -> BigUint {
+    BigUint::from_bytes_le(n.as_bytes())
+}
+
+fn biguint_to_ristretto_point(n: &BigUint) -> Result<RistrettoPoint, String> {
+    let bytes = n.to_bytes_le();
+    let mut buf = [0u8; 32];
+    if bytes.len() > 32 {
+        return Err("commitment too large for 32-byte point".into());
+    }
+    buf[..bytes.len()].copy_from_slice(&bytes);
+    CompressedRistretto(buf)
+        .decompress()
+        .ok_or_else(|| format!("invalid compressed point for value {}", n))
+}
+
+fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
+    BigUint::from_bytes_le(n.compress().as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_cmd::Command;
+    use clap::CommandFactory;
+
+    #[test]
+    fn verify_cli() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn test_version() {
+        let mut cmd = Command::cargo_bin("cli").unwrap();
+        cmd.arg("--version")
+            .assert()
+            .success()
+            .stdout(predicates::str::contains("0.1.0"));
+    }
+
+    #[test]
+    fn test_generate_shares() {
+        Command::cargo_bin("cli")
+            .unwrap()
+            .args([
+                "generate-shares",
+                "--secret",
+                "25",
+                "--players",
+                "5",
+                "--threshold",
+                "3",
+            ])
+            .assert()
+            .success();
     }
 }
