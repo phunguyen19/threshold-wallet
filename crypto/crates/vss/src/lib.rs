@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_value_players_threshold() {
+    fn test_deal_invalid_value_players_threshold() {
         let test_cases: Vec<(usize, usize)> = vec![(0, 0), (1, 1), (2, 1), (5, 1), (5, 6)];
         for t in test_cases {
             let r = deal(DealParams {
@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_each_deal_run_produces_different_result() {
+    fn test_deal_each_deal_run_produces_different_result() {
         let mut deal_results: Vec<DealResult> = vec![];
         for _ in 0..2 {
             deal_results.push(
