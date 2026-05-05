@@ -1,7 +1,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{RistrettoPoint, Scalar, ristretto::CompressedRistretto};
 use num_bigint::BigUint;
+use num_bigint::RandBigInt;
 use num_traits::Num;
+use rand::thread_rng;
+use vss::DealParams;
 
 #[derive(Parser, Debug)]
 #[command(name = "dkg", version, about, long_about = None)]
@@ -34,8 +37,23 @@ impl NumberFormat {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Generate shares for a secret
+    /// Generate commitments and shares for DKG
     GenerateShares {
+        /// Participant ID
+        #[arg(long, value_parser = parse_biguint)]
+        participant_id: BigUint,
+
+        /// How many participants
+        #[arg(long)]
+        participants: usize,
+
+        /// Minimal number
+        #[arg(long)]
+        threshold: usize,
+    },
+
+    /// Generate shares for a secret
+    GenerateShares2 {
         /// Secret
         #[arg(long, value_parser = parse_biguint)]
         secret: BigUint,
@@ -175,6 +193,35 @@ fn derive_key_share(params: DeriveKeyShareParams) -> DeriveKeyShareResult {
     }
 }
 
+struct GenerateShareParams {
+    participant_id: BigUint,
+    participants: usize,
+    threshold: usize,
+}
+
+fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
+    let random_secret = gen_rand_biguint();
+
+    let vss_result = vss::deal(DealParams {
+        secret: random_secret,
+        players: params.participants,
+        threshold: params.threshold,
+    });
+
+    Ok(())
+}
+
+fn gen_rand_biguint() -> BigUint {
+    let mut rng = thread_rng();
+    // RistrettoPoint work under q ~ 2^252
+    rng.gen_biguint(252)
+}
+
+fn gen_rand_scalar() -> Scalar {
+    let mut csprng = rand::rngs::OsRng;
+    Scalar::random(&mut csprng)
+}
+
 fn main() -> Result<(), String> {
     let args = Cli::parse();
     let fmt = &args.number_format;
@@ -182,6 +229,24 @@ fn main() -> Result<(), String> {
 
     match args.command {
         Commands::GenerateShares {
+            participant_id,
+            participants,
+            threshold,
+        } => {
+            if verbose {
+                println!("participant_id:   {}", participant_id);
+                println!("participants:   {}", participants);
+                println!("threshold: {}", threshold);
+                println!("curve:     ristretto255");
+            };
+
+            generate_shares(GenerateShareParams {
+                participant_id,
+                participants,
+                threshold,
+            })
+        }
+        Commands::GenerateShares2 {
             secret,
             players,
             threshold,

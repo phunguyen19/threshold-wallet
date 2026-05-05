@@ -227,6 +227,8 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "predicates",
+ "rand",
+ "sha2",
  "vss",
 ]
 
