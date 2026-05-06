@@ -214,9 +214,16 @@ fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
         secret: random_secret,
         players: params.participants,
         threshold: params.threshold,
-    });
+    })?;
 
-    write_participant_file(params.participant_id);
+    let _ = write_participant_file(Participant {
+        id: params.participant_id,
+        pedersen_commitments: vss_result
+            .commitments
+            .iter()
+            .map(|v| format!("0x{}", v.to_str_radix(16)))
+            .collect(),
+    });
     let participant = read_participant_file(params.participant_id);
     println!("{:?}", participant);
 
@@ -226,12 +233,13 @@ fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
 #[derive(Serialize, Deserialize, Debug)]
 struct Participant {
     id: usize,
+    pedersen_commitments: Vec<String>,
 }
 
-fn write_participant_file(id: usize) -> Result<(), Box<dyn Error>> {
-    let file = File::create(format!("output/participant-{}.json", id))?;
+fn write_participant_file(participant: Participant) -> Result<(), Box<dyn Error>> {
+    let file = File::create(format!("output/participant-{}.json", participant.id))?;
     let writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(writer, &Participant { id })?;
+    serde_json::to_writer_pretty(writer, &participant)?;
     Ok(())
 }
 
