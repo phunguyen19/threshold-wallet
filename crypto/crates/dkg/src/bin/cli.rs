@@ -1,9 +1,17 @@
+use std::error::Error;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::Write;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{RistrettoPoint, Scalar, ristretto::CompressedRistretto};
 use num_bigint::BigUint;
 use num_bigint::RandBigInt;
 use num_traits::Num;
 use rand::thread_rng;
+use serde::Deserialize;
+use serde::Serialize;
 use vss::DealParams;
 
 #[derive(Parser, Debug)]
@@ -40,8 +48,8 @@ enum Commands {
     /// Generate commitments and shares for DKG
     GenerateShares {
         /// Participant ID
-        #[arg(long, value_parser = parse_biguint)]
-        participant_id: BigUint,
+        #[arg(long)]
+        participant_id: usize,
 
         /// How many participants
         #[arg(long)]
@@ -194,7 +202,7 @@ fn derive_key_share(params: DeriveKeyShareParams) -> DeriveKeyShareResult {
 }
 
 struct GenerateShareParams {
-    participant_id: BigUint,
+    participant_id: usize,
     participants: usize,
     threshold: usize,
 }
@@ -208,7 +216,30 @@ fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
         threshold: params.threshold,
     });
 
+    write_participant_file(params.participant_id);
+    let participant = read_participant_file(params.participant_id);
+    println!("{:?}", participant);
+
     Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Participant {
+    id: usize,
+}
+
+fn write_participant_file(id: usize) -> Result<(), Box<dyn Error>> {
+    let file = File::create(format!("output/participant-{}.json", id))?;
+    let writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(writer, &Participant { id })?;
+    Ok(())
+}
+
+fn read_participant_file(id: usize) -> Result<Participant, Box<dyn Error>> {
+    let file = File::open(format!("output/participant-{}.json", id))?;
+    let reader = BufReader::new(file);
+    let participant: Participant = serde_json::from_reader(reader)?;
+    Ok(participant)
 }
 
 fn gen_rand_biguint() -> BigUint {
