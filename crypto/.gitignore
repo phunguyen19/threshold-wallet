@@ -9,3 +9,6 @@
 
 # MSVC Windows builds
 *.pdb
+
+# Output files from user commands
+output/
