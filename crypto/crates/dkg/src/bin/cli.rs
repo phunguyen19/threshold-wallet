@@ -2,17 +2,18 @@ use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
-use std::io::Write;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use curve25519_dalek::{RistrettoPoint, Scalar, ristretto::CompressedRistretto};
+use curve25519_dalek::Scalar;
+use dkg::biguint_to_hex;
+use dkg::biguint_to_scalar;
+use dkg::feldman_commitments;
+use dkg::gen_rand_biguint;
+use dkg::scalar_to_biguint;
 use num_bigint::BigUint;
-use num_bigint::RandBigInt;
 use num_traits::Num;
-use rand::thread_rng;
 use serde::Deserialize;
 use serde::Serialize;
-use vss::DealParams;
 
 #[derive(Parser, Debug)]
 #[command(name = "dkg", version, about, long_about = None)]
@@ -56,21 +57,6 @@ enum Commands {
         participants: usize,
 
         /// Minimal number
-        #[arg(long)]
-        threshold: usize,
-    },
-
-    /// Generate shares for a secret
-    GenerateShares2 {
-        /// Secret
-        #[arg(long, value_parser = parse_biguint)]
-        secret: BigUint,
-
-        /// How many participants
-        #[arg(long)]
-        players: usize,
-
-        /// Minimal number of shares needed to reconstruct the secret
         #[arg(long)]
         threshold: usize,
     },
@@ -210,18 +196,34 @@ struct GenerateShareParams {
 fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
     let random_secret = gen_rand_biguint();
 
-    let vss_result = vss::deal(DealParams {
+    let pedersen_deal_result = vss::deal(vss::DealParams {
         secret: random_secret,
         players: params.participants,
         threshold: params.threshold,
     })?;
 
+    // Feldman commitments
+    let feldman_commitments = feldman_commitments(pedersen_deal_result.coeffs_a);
+
     let _ = write_participant_file(Participant {
         id: params.participant_id,
-        pedersen_commitments: vss_result
+        pedersen_commitments: pedersen_deal_result
             .commitments
             .iter()
-            .map(|v| format!("0x{}", v.to_str_radix(16)))
+            .map(|v| biguint_to_hex(&v))
+            .collect(),
+        feldman_commitments: feldman_commitments
+            .iter()
+            .map(|v| biguint_to_hex(&v))
+            .collect(),
+        shares: pedersen_deal_result
+            .shares
+            .iter()
+            .map(|v| ParticipantShare {
+                id: v.0,
+                s: biguint_to_hex(&v.1),
+                u: biguint_to_hex(&v.2),
+            })
             .collect(),
     });
     let participant = read_participant_file(params.participant_id);
@@ -234,6 +236,15 @@ fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
 struct Participant {
     id: usize,
     pedersen_commitments: Vec<String>,
+    feldman_commitments: Vec<String>,
+    shares: Vec<ParticipantShare>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ParticipantShare {
+    id: usize,
+    s: String,
+    u: String,
 }
 
 fn write_participant_file(participant: Participant) -> Result<(), Box<dyn Error>> {
@@ -248,17 +259,6 @@ fn read_participant_file(id: usize) -> Result<Participant, Box<dyn Error>> {
     let reader = BufReader::new(file);
     let participant: Participant = serde_json::from_reader(reader)?;
     Ok(participant)
-}
-
-fn gen_rand_biguint() -> BigUint {
-    let mut rng = thread_rng();
-    // RistrettoPoint work under q ~ 2^252
-    rng.gen_biguint(252)
-}
-
-fn gen_rand_scalar() -> Scalar {
-    let mut csprng = rand::rngs::OsRng;
-    Scalar::random(&mut csprng)
 }
 
 fn main() -> Result<(), String> {
@@ -284,41 +284,6 @@ fn main() -> Result<(), String> {
                 participants,
                 threshold,
             })
-        }
-        Commands::GenerateShares2 {
-            secret,
-            players,
-            threshold,
-        } => {
-            if verbose {
-                println!("secret:    {}", fmt.format(&secret));
-                println!("players:   {}", players);
-                println!("threshold: {}", threshold);
-                println!("curve:     ristretto255");
-            }
-            let r = vss::deal(vss::DealParams {
-                secret,
-                players,
-                threshold,
-            })?;
-
-            let (commitments, shares) = (r.commitments, r.shares);
-
-            println!();
-            println!("✓ Deal Complete");
-            println!("────────────────────────────────────────");
-            println!("Commitments ({}):", commitments.len());
-            for (i, c) in commitments.iter().enumerate() {
-                println!("  E[{}] = {}", i, fmt.format(c));
-            }
-            println!();
-            println!("Shares ({}):", shares.len());
-            for (i, s, t) in &shares {
-                println!("  [{}]  s = {}  t = {}", i, fmt.format(s), fmt.format(t));
-            }
-            println!("────────────────────────────────────────");
-
-            Ok(())
         }
         Commands::VerifyShares { commitments, share } => {
             if verbose {
@@ -393,74 +358,5 @@ fn main() -> Result<(), String> {
         Commands::ComputePublicKey {} => {
             todo!("to be implemented")
         }
-    }
-}
-
-/// WARNING: if n > 252-bit value (l), function will perform n mod l
-/// because Ristretto255 works under l ~ 252-bit value
-fn biguint_to_scalar(n: &BigUint) -> Scalar {
-    let mut b = n.to_bytes_le();
-    b.resize(64, 0u8);
-
-    let r: [u8; 64] = b[..64].try_into().expect("always 64 bytes after resize");
-
-    Scalar::from_bytes_mod_order_wide(&r)
-}
-
-fn scalar_to_biguint(n: &Scalar) -> BigUint {
-    BigUint::from_bytes_le(n.as_bytes())
-}
-
-fn biguint_to_ristretto_point(n: &BigUint) -> Result<RistrettoPoint, String> {
-    let bytes = n.to_bytes_le();
-    let mut buf = [0u8; 32];
-    if bytes.len() > 32 {
-        return Err("commitment too large for 32-byte point".into());
-    }
-    buf[..bytes.len()].copy_from_slice(&bytes);
-    CompressedRistretto(buf)
-        .decompress()
-        .ok_or_else(|| format!("invalid compressed point for value {}", n))
-}
-
-fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
-    BigUint::from_bytes_le(n.compress().as_bytes())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use assert_cmd::Command;
-    use clap::CommandFactory;
-
-    #[test]
-    fn verify_cli() {
-        Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn test_version() {
-        let mut cmd = Command::cargo_bin("cli").unwrap();
-        cmd.arg("--version")
-            .assert()
-            .success()
-            .stdout(predicates::str::contains("0.1.0"));
-    }
-
-    #[test]
-    fn test_generate_shares() {
-        Command::cargo_bin("cli")
-            .unwrap()
-            .args([
-                "generate-shares",
-                "--secret",
-                "25",
-                "--players",
-                "5",
-                "--threshold",
-                "3",
-            ])
-            .assert()
-            .success();
     }
 }
