@@ -1,7 +1,9 @@
 use std::error::Error;
+use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
+use std::path::Path;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use curve25519_dalek::Scalar;
@@ -205,35 +207,39 @@ fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
     // Feldman commitments
     let feldman_commitments = feldman_commitments(pedersen_deal_result.coeffs_a);
 
-    let _ = write_participant_file(Participant {
-        id: params.participant_id,
-        pedersen_commitments: pedersen_deal_result
-            .commitments
-            .iter()
-            .map(|v| biguint_to_hex(&v))
-            .collect(),
-        feldman_commitments: feldman_commitments
-            .iter()
-            .map(|v| biguint_to_hex(&v))
-            .collect(),
-        shares: pedersen_deal_result
-            .shares
-            .iter()
-            .map(|v| ParticipantShare {
-                id: v.0,
-                s: biguint_to_hex(&v.1),
-                u: biguint_to_hex(&v.2),
-            })
-            .collect(),
-    });
-    let participant = read_participant_file(params.participant_id);
-    println!("{:?}", participant);
+    let participant_files = ParticipantFiles::new(params.participant_id);
+
+    participant_files
+        .write_generated(ParticipantGenerated {
+            id: params.participant_id,
+            pedersen_commitments: pedersen_deal_result
+                .commitments
+                .iter()
+                .map(|v| biguint_to_hex(&v))
+                .collect(),
+            feldman_commitments: feldman_commitments
+                .iter()
+                .map(|v| biguint_to_hex(&v))
+                .collect(),
+            shares: pedersen_deal_result
+                .shares
+                .iter()
+                .map(|v| ParticipantShare {
+                    id: v.0,
+                    s: biguint_to_hex(&v.1),
+                    u: biguint_to_hex(&v.2),
+                })
+                .collect(),
+        })
+        .expect("write generated result fail");
+
+    println!("{:?}", participant_files.read_generated());
 
     Ok(())
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Participant {
+struct ParticipantGenerated {
     id: usize,
     pedersen_commitments: Vec<String>,
     feldman_commitments: Vec<String>,
@@ -247,18 +253,38 @@ struct ParticipantShare {
     u: String,
 }
 
-fn write_participant_file(participant: Participant) -> Result<(), Box<dyn Error>> {
-    let file = File::create(format!("output/participant-{}.json", participant.id))?;
-    let writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(writer, &participant)?;
-    Ok(())
+struct ParticipantFiles {
+    generated_filepath: String,
+    received_filepath: String,
 }
 
-fn read_participant_file(id: usize) -> Result<Participant, Box<dyn Error>> {
-    let file = File::open(format!("output/participant-{}.json", id))?;
-    let reader = BufReader::new(file);
-    let participant: Participant = serde_json::from_reader(reader)?;
-    Ok(participant)
+impl ParticipantFiles {
+    fn new(id: usize) -> Self {
+        ParticipantFiles {
+            generated_filepath: format!("output/participant-{}/generated.json", id),
+            received_filepath: format!("output/participant-{}/received.json", id),
+        }
+    }
+    fn write_generated(
+        &self,
+        participant_generated: ParticipantGenerated,
+    ) -> Result<(), Box<dyn Error>> {
+        let path = Path::new(self.generated_filepath.as_str());
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let file = File::create(path)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, &participant_generated)?;
+        Ok(())
+    }
+
+    fn read_generated(&self) -> Result<ParticipantGenerated, Box<dyn Error>> {
+        let file = File::open(&self.generated_filepath)?;
+        let reader = BufReader::new(file);
+        let participant: ParticipantGenerated = serde_json::from_reader(reader)?;
+        Ok(participant)
+    }
 }
 
 fn main() -> Result<(), String> {
