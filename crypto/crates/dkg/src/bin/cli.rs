@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufWriter;
+use std::iter::Map;
 use std::path::Path;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -208,6 +210,17 @@ fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
     let feldman_commitments = feldman_commitments(pedersen_deal_result.coeffs_a);
 
     let participant_files = ParticipantFiles::new(params.participant_id);
+    let mut shares_hashmap: HashMap<String, ParticipantShare> = HashMap::new();
+    for share in pedersen_deal_result.shares {
+        shares_hashmap.insert(
+            share.0.to_string(),
+            ParticipantShare {
+                id: share.0,
+                s: biguint_to_hex(&share.1),
+                u: biguint_to_hex(&share.2),
+            },
+        );
+    }
 
     participant_files
         .write_generated(ParticipantGenerated {
@@ -221,15 +234,7 @@ fn generate_shares(params: GenerateShareParams) -> Result<(), String> {
                 .iter()
                 .map(|v| biguint_to_hex(&v))
                 .collect(),
-            shares: pedersen_deal_result
-                .shares
-                .iter()
-                .map(|v| ParticipantShare {
-                    id: v.0,
-                    s: biguint_to_hex(&v.1),
-                    u: biguint_to_hex(&v.2),
-                })
-                .collect(),
+            shares: shares_hashmap,
         })
         .expect("write generated result fail");
 
@@ -243,7 +248,7 @@ struct ParticipantGenerated {
     id: usize,
     pedersen_commitments: Vec<String>,
     feldman_commitments: Vec<String>,
-    shares: Vec<ParticipantShare>,
+    shares: HashMap<String, ParticipantShare>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
