@@ -78,14 +78,13 @@ enum Commands {
         #[arg(long)]
         participants: usize,
     },
+    VerifyFeldman {},
     /// Derive key share of each play from received shares by other players.
     /// x_i = sum(s_ji)
     DeriveKeyShare {
         #[arg(long, short, value_delimiter = ':', value_parser = cli_parse_biguint)]
         shares: Vec<BigUint>,
     },
-    ///
-    VerifyFeldman {},
     ComputePublicKey {},
 }
 
@@ -395,6 +394,9 @@ fn main() -> Result<(), String> {
             participant_id,
             participants,
         } => command_handler_verify_pedersen(participant_id, participants),
+        Commands::VerifyFeldman {} => {
+            todo!("to be implemented")
+        }
         Commands::DeriveKeyShare { shares } => {
             let DeriveKeyShareResult { result: s } =
                 command_handler_derive_key_share(DeriveKeyShareParams {
@@ -406,9 +408,6 @@ fn main() -> Result<(), String> {
             println!("{}", fmt.format(&scalar_to_biguint(&s)));
 
             Ok(())
-        }
-        Commands::VerifyFeldman {} => {
-            todo!("to be implemented")
         }
         Commands::ComputePublicKey {} => {
             todo!("to be implemented")
