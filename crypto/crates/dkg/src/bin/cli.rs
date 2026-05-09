@@ -8,6 +8,7 @@ use std::io::BufWriter;
 use std::io::Write;
 use std::ops::Deref;
 use std::path::Path;
+use std::str::FromStr;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use curve25519_dalek::Scalar;
@@ -15,11 +16,14 @@ use dkg::biguint_to_hex;
 use dkg::biguint_to_scalar;
 use dkg::feldman_commitments;
 use dkg::gen_rand_biguint;
+use dkg::hex_to_biguint;
 use dkg::scalar_to_biguint;
 use num_bigint::BigUint;
 use num_traits::Num;
 use serde::Deserialize;
 use serde::Serialize;
+use vss::VerifyParams;
+use vss::verify;
 
 #[derive(Parser, Debug)]
 #[command(name = "dkg", version, about, long_about = None)]
@@ -72,6 +76,10 @@ enum Commands {
         /// Participant ID that will be read data from
         #[arg(long, short)]
         participant_id: usize,
+
+        /// How many participants
+        #[arg(long)]
+        participants: usize,
     },
     /// Derive key share of each play from received shares by other players.
     /// x_i = sum(s_ji)
@@ -79,16 +87,8 @@ enum Commands {
         #[arg(long, short, value_delimiter = ':', value_parser = cli_parse_biguint)]
         shares: Vec<BigUint>,
     },
-    /// Generate Feldman Commitments and broadcast to all players
-    /// A_ik = g^a_ik (for k = 0,...t of coeff-th of polynomial f)
-    FeldmanCommitments {},
     ///
     VerifyFeldman {},
-    ReconstructShare {
-        /// List of shares for reconstruct the secret
-        #[arg(long, short, value_parser = cli_parse_reconstruct_shares_param)]
-        shares: Vec<(BigUint, BigUint)>,
-    },
     ComputePublicKey {},
 }
 
@@ -337,6 +337,59 @@ fn command_handler_generate_shares(params: GenerateShareParams) -> Result<(), St
     Ok(())
 }
 
+fn command_handler_verify_shares(participant_id: usize, participants: usize) -> Result<(), String> {
+    let files = ParticipantFiles::new(participant_id);
+    let received_info = files
+        .read_received()
+        .or_else(|err| Err(format!("cannot read participant file, error: {}", err)))?;
+
+    if received_info.pedersen_commitments.len() != participants
+        || received_info.shares_from.len() != participants
+    {
+        return Err("have not received data of all participants".into());
+    }
+
+    // verify each received share with corresponding pedersen commitments
+    for p_id in 1..=participants {
+        // get share received from pariticipant p_id
+        let share: (usize, BigUint, BigUint);
+        if let Some(s) = received_info.shares_from.get(&p_id.to_string()).cloned() {
+            share = (participant_id, hex_to_biguint(&s.s)?, hex_to_biguint(&s.u)?);
+        } else {
+            return Err(format!(
+                "cannot load share of pariticipant {} from received data of participant {}",
+                p_id, participant_id
+            ));
+        }
+
+        // get corresponding received from pariticipant p_id
+        let mut pedersen_commitments: Vec<BigUint> = vec![];
+        if let Some(s) = received_info
+            .pedersen_commitments
+            .get(&p_id.to_string())
+            .cloned()
+        {
+            for c in s {
+                pedersen_commitments.push(hex_to_biguint(&c.as_str())?);
+            }
+        } else {
+            return Err(format!(
+                "cannot load Pedersen commitments of pariticipant {} from received data of participant {}",
+                p_id, participant_id
+            ));
+        }
+
+        let verify_result = vss::verify(VerifyParams {
+            commitments: pedersen_commitments,
+            share: share,
+        });
+
+        println!("{:?}", verify_result);
+    }
+
+    Ok(())
+}
+
 fn command_handler_derive_key_share(params: DeriveKeyShareParams) -> DeriveKeyShareResult {
     DeriveKeyShareResult {
         result: params
@@ -356,21 +409,15 @@ fn main() -> Result<(), String> {
             participant_id,
             participants,
             threshold,
-        } => {
-            if verbose {
-                println!("participant_id:   {}", participant_id);
-                println!("participants:   {}", participants);
-                println!("threshold: {}", threshold);
-                println!("curve:     ristretto255");
-            };
-
-            command_handler_generate_shares(GenerateShareParams {
-                participant_id,
-                participants,
-                threshold,
-            })
-        }
-        Commands::VerifyShares { participant_id } => Ok(()),
+        } => command_handler_generate_shares(GenerateShareParams {
+            participant_id,
+            participants,
+            threshold,
+        }),
+        Commands::VerifyShares {
+            participant_id,
+            participants,
+        } => command_handler_verify_shares(participant_id, participants),
         Commands::DeriveKeyShare { shares } => {
             let DeriveKeyShareResult { result: s } =
                 command_handler_derive_key_share(DeriveKeyShareParams {
@@ -383,29 +430,8 @@ fn main() -> Result<(), String> {
 
             Ok(())
         }
-        Commands::FeldmanCommitments {} => {
-            todo!("to be implemented")
-        }
         Commands::VerifyFeldman {} => {
             todo!("to be implemented")
-        }
-        Commands::ReconstructShare { shares } => {
-            if verbose {
-                println!("shares ({}):", shares.len());
-                for (x, y) in &shares {
-                    println!("  x = {}  y = {}", fmt.format(x), fmt.format(y));
-                }
-            }
-
-            let result = vss::reconstruct(vss::ReconstructParams { shares });
-
-            println!();
-            println!("✓ Reconstructed Secret");
-            println!("────────────────────────────────────────");
-            println!("  Secret: {}", fmt.format(&result));
-            println!("────────────────────────────────────────");
-
-            Ok(())
         }
         Commands::ComputePublicKey {} => {
             todo!("to be implemented")
