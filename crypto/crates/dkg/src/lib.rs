@@ -3,6 +3,7 @@ use curve25519_dalek::{
 };
 use num_bigint::BigUint;
 use num_bigint::RandBigInt;
+use num_traits::Num;
 use rand::thread_rng;
 
 static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
@@ -58,4 +59,12 @@ pub fn gen_rand_scalar() -> Scalar {
 
 pub fn biguint_to_hex(n: &BigUint) -> String {
     format!("0x{}", n.to_str_radix(16))
+}
+
+pub fn hex_to_biguint(s: &str) -> Result<BigUint, String> {
+    if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
+    } else {
+        BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
+    }
 }
