@@ -6,9 +6,7 @@ use std::fs::OpenOptions;
 use std::io::BufReader;
 use std::io::BufWriter;
 use std::io::Write;
-use std::ops::Deref;
 use std::path::Path;
-use std::str::FromStr;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use curve25519_dalek::Scalar;
@@ -23,7 +21,6 @@ use num_traits::Num;
 use serde::Deserialize;
 use serde::Serialize;
 use vss::VerifyParams;
-use vss::verify;
 
 #[derive(Parser, Debug)]
 #[command(name = "dkg", version, about, long_about = None)]
@@ -230,35 +227,6 @@ impl ParticipantFiles {
     }
 }
 
-fn cli_parse_reconstruct_shares_param(val: &str) -> Result<(BigUint, BigUint), String> {
-    let s: Vec<&str> = val.split(':').collect();
-    if s.len() != 2 {
-        return Err(format!("cannot parse share param: {:?}", val));
-    }
-
-    let x = match cli_parse_biguint(s[0]) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(format!(
-                "cannot parse x={} of share={:?} error: {:?}",
-                s[0], val, e
-            ));
-        }
-    };
-
-    let y = match cli_parse_biguint(s[1]) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(format!(
-                "cannot parse y={} of share={:?} error: {:?}",
-                s[1], val, e
-            ));
-        }
-    };
-
-    Ok((x, y))
-}
-
 fn cli_parse_biguint(s: &str) -> Result<BigUint, String> {
     if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
@@ -382,9 +350,15 @@ fn command_handler_verify_shares(participant_id: usize, participants: usize) -> 
         let verify_result = vss::verify(VerifyParams {
             commitments: pedersen_commitments,
             share: share,
-        });
+        })?;
 
-        println!("{:?}", verify_result);
+        println!(
+            "Participant: {} , Result {}, Commit Value: {}, Share Value: {}",
+            p_id,
+            verify_result.result,
+            verify_result.verify_commitment_value,
+            verify_result.verify_share_value
+        );
     }
 
     Ok(())
@@ -402,7 +376,7 @@ fn command_handler_derive_key_share(params: DeriveKeyShareParams) -> DeriveKeySh
 fn main() -> Result<(), String> {
     let args = Cli::parse();
     let fmt = &args.number_format;
-    let verbose = args.verbose;
+    let _verbose = args.verbose;
 
     match args.command {
         Commands::GenerateShares {
