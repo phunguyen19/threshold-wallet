@@ -69,7 +69,7 @@ enum Commands {
     },
     /// Read participant received file and verify the shares and commitments
     /// received from each of other participants
-    VerifyShares {
+    VerifyPedersen {
         /// Participant ID that will be read data from
         #[arg(long, short)]
         participant_id: usize,
@@ -305,7 +305,10 @@ fn command_handler_generate_shares(params: GenerateShareParams) -> Result<(), St
     Ok(())
 }
 
-fn command_handler_verify_shares(participant_id: usize, participants: usize) -> Result<(), String> {
+fn command_handler_verify_pedersen(
+    participant_id: usize,
+    participants: usize,
+) -> Result<(), String> {
     let files = ParticipantFiles::new(participant_id);
     let received_info = files
         .read_received()
@@ -388,10 +391,10 @@ fn main() -> Result<(), String> {
             participants,
             threshold,
         }),
-        Commands::VerifyShares {
+        Commands::VerifyPedersen {
             participant_id,
             participants,
-        } => command_handler_verify_shares(participant_id, participants),
+        } => command_handler_verify_pedersen(participant_id, participants),
         Commands::DeriveKeyShare { shares } => {
             let DeriveKeyShareResult { result: s } =
                 command_handler_derive_key_share(DeriveKeyShareParams {
