@@ -1,0 +1,70 @@
+use curve25519_dalek::{
+    RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, ristretto::CompressedRistretto,
+};
+use num_bigint::BigUint;
+use num_bigint::RandBigInt;
+use num_traits::Num;
+use rand::thread_rng;
+
+static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
+
+pub fn feldman_commitments(coeffs: Vec<BigUint>) -> Vec<BigUint> {
+    coeffs
+        .iter()
+        .map(|v| ristretto_point_to_biguint(&(G * &biguint_to_scalar(&v))))
+        .collect()
+}
+
+/// WARNING: if n > 252-bit value (l), function will perform n mod l
+/// because Ristretto255 works under l ~ 252-bit value
+pub fn biguint_to_scalar(n: &BigUint) -> Scalar {
+    let mut b = n.to_bytes_le();
+    b.resize(64, 0u8);
+
+    let r: [u8; 64] = b[..64].try_into().expect("always 64 bytes after resize");
+
+    Scalar::from_bytes_mod_order_wide(&r)
+}
+
+pub fn scalar_to_biguint(n: &Scalar) -> BigUint {
+    BigUint::from_bytes_le(n.as_bytes())
+}
+
+pub fn biguint_to_ristretto_point(n: &BigUint) -> Result<RistrettoPoint, String> {
+    let bytes = n.to_bytes_le();
+    let mut buf = [0u8; 32];
+    if bytes.len() > 32 {
+        return Err("commitment too large for 32-byte point".into());
+    }
+    buf[..bytes.len()].copy_from_slice(&bytes);
+    CompressedRistretto(buf)
+        .decompress()
+        .ok_or_else(|| format!("invalid compressed point for value {}", n))
+}
+
+pub fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
+    BigUint::from_bytes_le(n.compress().as_bytes())
+}
+
+pub fn gen_rand_biguint() -> BigUint {
+    let mut rng = thread_rng();
+    // RistrettoPoint work under q ~ 2^252
+    rng.gen_biguint(252)
+}
+
+pub fn gen_rand_scalar() -> Scalar {
+    let mut csprng = rand::rngs::OsRng;
+    Scalar::random(&mut csprng)
+}
+
+pub fn biguint_to_hex(n: &BigUint) -> String {
+    format!("0x{}", n.to_str_radix(16))
+}
+
+pub fn hex_to_biguint(s: &str) -> Result<BigUint, String> {
+    if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
+    } else {
+        BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
+    }
+}
