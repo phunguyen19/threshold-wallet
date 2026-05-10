@@ -9,17 +9,22 @@ use std::io::Write;
 use std::path::Path;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use curve25519_dalek::Scalar;
+use curve25519_dalek::{RistrettoPoint, Scalar, traits::Identity};
 use dkg::biguint_to_hex;
 use dkg::biguint_to_scalar;
 use dkg::feldman_commitments;
 use dkg::gen_rand_biguint;
 use dkg::hex_to_biguint;
+use dkg::hex_to_ristretto_point;
+use dkg::hex_to_scalar;
+use dkg::ristretto_point_to_biguint;
+use dkg::ristretto_point_to_hex;
 use dkg::scalar_to_biguint;
 use num_bigint::BigUint;
 use num_traits::Num;
 use serde::Deserialize;
 use serde::Serialize;
+use vss::G;
 use vss::VerifyParams;
 
 #[derive(Parser, Debug)]
@@ -66,7 +71,7 @@ enum Commands {
         #[arg(long)]
         participants: usize,
     },
-    VerifyFeldman {},
+    VerifyFeldman(VerifyFeldman),
     /// Derive key share of each play from received shares by other players.
     /// x_i = sum(s_ji)
     DeriveKeyShare {
@@ -176,6 +181,50 @@ impl GenerateShares {
     }
 }
 
+#[derive(Args, Debug)]
+struct VerifyFeldman {
+    #[arg(long)]
+    participant_id: usize,
+}
+
+impl VerifyFeldman {
+    fn execute(self) -> Result<(), String> {
+        // load received
+        let files = ParticipantFiles::new(self.participant_id);
+        let received = files.read_received()?;
+
+        for (_, (sender_id, commitments_str)) in received.feldman_commitments.iter().enumerate() {
+            // calculate commitment value
+            let mut commitment_value = RistrettoPoint::identity(); // (0,0)
+            let j = Scalar::from(self.participant_id as u64);
+            let mut j_pow_k = Scalar::ONE;
+            for v in commitments_str {
+                commitment_value += hex_to_ristretto_point(&v)? * j_pow_k;
+                j_pow_k *= j;
+            }
+
+            // calculate share value
+            let share = received
+                .shares_from
+                .get(sender_id)
+                .cloned()
+                .ok_or(format!("cannot read share from {}", sender_id))?;
+            let share_value = G * hex_to_scalar(&share.s)?;
+
+            // Compare
+            println!(
+                "Sender: {}, Result: {}, Commitment Value: {}, Share Value: {}",
+                sender_id,
+                commitment_value == share_value,
+                ristretto_point_to_hex(&commitment_value),
+                ristretto_point_to_hex(&share_value)
+            );
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct ParticipantGenerated {
     id: usize,
@@ -278,10 +327,12 @@ impl ParticipantFiles {
         Ok(())
     }
 
-    fn read_received(&self) -> Result<ParticipantReceived, Box<dyn Error>> {
-        let file = File::open(&self.received_filepath)?;
+    fn read_received(&self) -> Result<ParticipantReceived, String> {
+        let file = File::open(&self.received_filepath)
+            .map_err(|e| format!("cannot open received file, error: {}", e))?;
         let reader = BufReader::new(file);
-        let result: ParticipantReceived = serde_json::from_reader(reader)?;
+        let result: ParticipantReceived = serde_json::from_reader(reader)
+            .map_err(|e| format!("cannot read received file, error: {}", e))?;
         Ok(result)
     }
 }
@@ -388,9 +439,7 @@ fn main() -> Result<(), String> {
             participant_id,
             participants,
         } => command_handler_verify_pedersen(participant_id, participants),
-        Commands::VerifyFeldman {} => {
-            todo!("to be implemented")
-        }
+        Commands::VerifyFeldman(args) => args.execute(),
         Commands::DeriveKeyShare { shares } => {
             let DeriveKeyShareResult { result: s } =
                 command_handler_derive_key_share(DeriveKeyShareParams {
