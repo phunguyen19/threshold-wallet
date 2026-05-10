@@ -17,7 +17,6 @@ use dkg::gen_rand_biguint;
 use dkg::hex_to_biguint;
 use dkg::hex_to_ristretto_point;
 use dkg::hex_to_scalar;
-use dkg::ristretto_point_to_biguint;
 use dkg::ristretto_point_to_hex;
 use dkg::scalar_to_biguint;
 use num_bigint::BigUint;
