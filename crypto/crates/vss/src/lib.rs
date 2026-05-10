@@ -7,8 +7,8 @@ use curve25519_dalek::{
 use num_bigint::BigUint;
 use sha2::Sha512;
 
-static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
-static H: LazyLock<RistrettoPoint> = LazyLock::new(|| {
+pub static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
+pub static H: LazyLock<RistrettoPoint> = LazyLock::new(|| {
     let msg = "VSS_pedersen_h_generator_v1";
     RistrettoPoint::hash_from_bytes::<Sha512>(msg.as_bytes())
 });

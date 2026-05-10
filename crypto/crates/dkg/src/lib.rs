@@ -68,3 +68,15 @@ pub fn hex_to_biguint(s: &str) -> Result<BigUint, String> {
         BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
     }
 }
+
+pub fn hex_to_scalar(s: &str) -> Result<Scalar, String> {
+    Ok(biguint_to_scalar(&hex_to_biguint(&s)?))
+}
+
+pub fn hex_to_ristretto_point(s: &str) -> Result<RistrettoPoint, String> {
+    Ok(biguint_to_ristretto_point(&hex_to_biguint(&s)?)?)
+}
+
+pub fn ristretto_point_to_hex(v: &RistrettoPoint) -> String {
+    biguint_to_hex(&ristretto_point_to_biguint(v))
+}
