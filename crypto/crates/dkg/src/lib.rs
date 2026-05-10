@@ -8,11 +8,21 @@ use rand::thread_rng;
 
 static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
 
+/// Generate Feldman VSS Commitments
 pub fn feldman_commitments(coeffs: Vec<BigUint>) -> Vec<BigUint> {
     coeffs
         .iter()
         .map(|v| ristretto_point_to_biguint(&(G * &biguint_to_scalar(&v))))
         .collect()
+}
+
+pub fn gennaro_derive_key_share(shares: Vec<BigUint>) -> Result<BigUint, String> {
+    return Ok(scalar_to_biguint(
+        &shares
+            .iter()
+            .map(|v| biguint_to_scalar(&v))
+            .fold(Scalar::ZERO, |sum, share| sum + share),
+    ));
 }
 
 /// WARNING: if n > 252-bit value (l), function will perform n mod l

@@ -11,14 +11,13 @@ use std::path::Path;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{RistrettoPoint, Scalar, traits::Identity};
 use dkg::biguint_to_hex;
-use dkg::biguint_to_scalar;
 use dkg::feldman_commitments;
 use dkg::gen_rand_biguint;
+use dkg::gennaro_derive_key_share;
 use dkg::hex_to_biguint;
 use dkg::hex_to_ristretto_point;
 use dkg::hex_to_scalar;
 use dkg::ristretto_point_to_hex;
-use dkg::scalar_to_biguint;
 use num_bigint::BigUint;
 use num_traits::Num;
 use serde::Deserialize;
@@ -65,21 +64,8 @@ enum Commands {
     VerifyFeldman(VerifyFeldman),
     /// Derive key share of each play from received shares by other players.
     /// x_i = sum(s_ji)
-    DeriveKeyShare {
-        #[arg(long, short, value_delimiter = ':', value_parser = cli_parse_biguint)]
-        shares: Vec<BigUint>,
-    },
+    DeriveShareKey(DeriveKeyShare),
     ComputePublicKey {},
-}
-
-#[derive(Debug)]
-struct DeriveKeyShareParams {
-    shares: Vec<Scalar>,
-}
-
-#[derive(Debug)]
-struct DeriveKeyShareResult {
-    result: Scalar,
 }
 
 #[derive(Args, Debug)]
@@ -290,6 +276,26 @@ impl VerifyFeldman {
     }
 }
 
+#[derive(Debug, Args)]
+struct DeriveKeyShare {
+    #[arg(long)]
+    participant_id: usize,
+}
+
+impl DeriveKeyShare {
+    fn execute(self) -> Result<(), String> {
+        let files = ParticipantFiles::new(self.participant_id);
+        let received = files.read_received()?;
+        let mut shares: Vec<BigUint> = vec![];
+        for (_, (_, ParticipantShare { s, u: _ })) in received.shares_from.iter().enumerate() {
+            shares.push(hex_to_biguint(&s)?);
+        }
+        let result = gennaro_derive_key_share(shares)?;
+        files.write_share_key(&result)?;
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct ParticipantGenerated {
     id: usize,
@@ -304,11 +310,18 @@ struct ParticipantShare {
     u: String,
 }
 
+struct ParticipantFiles {
+    generated_filepath: String,
+    received_filepath: String,
+    derived_filepath: String,
+}
+
 impl ParticipantFiles {
     fn new(id: usize) -> Self {
         ParticipantFiles {
             generated_filepath: format!("output/participant-{}/generated.json", id),
             received_filepath: format!("output/participant-{}/received.json", id),
+            derived_filepath: format!("output/participant-{}/derived.json", id),
         }
     }
 
@@ -400,6 +413,82 @@ impl ParticipantFiles {
             .map_err(|e| format!("cannot read received file, error: {}", e))?;
         Ok(result)
     }
+
+    fn ensure_derived_file(&self) -> Result<File, String> {
+        // create file for write
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true) // Create if missing; do nothing if exists
+            .open(self.derived_filepath.as_str())
+            .map_err(|e| format!("cannot open derived file, error: {}", e))?;
+
+        let read = self.read_derived();
+        if read.is_ok() {
+            return Ok(file);
+        }
+
+        // ensure parent dir is created
+        let path = Path::new(self.derived_filepath.as_str());
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "cannot create participant folder for derived file, error: {}",
+                    e
+                )
+            })?;
+        }
+
+        // write default data if file is new created
+        let metadata = file
+            .metadata()
+            .map_err(|e| format!("cannot read derived file metadata, error: {}", e))?;
+        if metadata.len() == 0 {
+            let default = ParticipantDerived {
+                share_key: String::new(),
+            };
+            let json_data = serde_json::to_string_pretty(&default)
+                .map_err(|e| format!("cannot serialize default derived file data, error: {}", e))?;
+            file.write_all(json_data.as_bytes())
+                .map_err(|e| format!("cannot write default data to derived file, error: {}", e))?;
+        }
+
+        Ok(file)
+    }
+
+    fn read_derived(&self) -> Result<ParticipantDerived, String> {
+        let file = File::open(&self.derived_filepath)
+            .map_err(|e| format!("cannot open derived file, error: {}", e))?;
+        let reader = BufReader::new(file);
+        let result: ParticipantDerived = serde_json::from_reader(reader)
+            .map_err(|e| format!("cannot read derived file, error: {}", e))?;
+        Ok(result)
+    }
+
+    fn read_share_key(&self) -> Result<BigUint, String> {
+        let derived = self.read_derived()?;
+        Ok(hex_to_biguint(&derived.share_key)?)
+    }
+
+    fn write_share_key(&self, value: &BigUint) -> Result<(), String> {
+        // ensure file data is created
+        self.ensure_derived_file()?;
+
+        // read and update data
+        let mut data = self.read_derived()?;
+        data.share_key = biguint_to_hex(value);
+
+        // overwrite with new data
+        let file = File::create(self.derived_filepath.to_string()).map_err(|e| {
+            format!(
+                "attempt to createa and truncate derived file to write new data, got error: {}",
+                e
+            )
+        })?; // File::create also truncates
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, &data)
+            .map_err(|e| format!("cannot write derived data, error: {}", e))?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -409,9 +498,9 @@ struct ParticipantReceived {
     shares_from: HashMap<String, ParticipantShare>,
 }
 
-struct ParticipantFiles {
-    generated_filepath: String,
-    received_filepath: String,
+#[derive(Serialize, Deserialize, Debug)]
+struct ParticipantDerived {
+    share_key: String,
 }
 
 fn cli_parse_biguint(s: &str) -> Result<BigUint, String> {
@@ -419,15 +508,6 @@ fn cli_parse_biguint(s: &str) -> Result<BigUint, String> {
         BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
     } else {
         BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
-    }
-}
-
-fn command_handler_derive_key_share(params: DeriveKeyShareParams) -> DeriveKeyShareResult {
-    DeriveKeyShareResult {
-        result: params
-            .shares
-            .iter()
-            .fold(Scalar::ZERO, |sum, share| sum + share),
     }
 }
 
@@ -440,18 +520,7 @@ fn main() -> Result<(), String> {
         Commands::GenerateShares(args) => args.execute(),
         Commands::VerifyPedersen(args) => args.execute(),
         Commands::VerifyFeldman(args) => args.execute(),
-        Commands::DeriveKeyShare { shares } => {
-            let DeriveKeyShareResult { result: s } =
-                command_handler_derive_key_share(DeriveKeyShareParams {
-                    shares: shares.iter().map(|s| biguint_to_scalar(s)).collect(),
-                });
-
-            println!("Derived Key Share");
-            println!("-------------------------");
-            println!("{}", fmt.format(&scalar_to_biguint(&s)));
-
-            Ok(())
-        }
+        Commands::DeriveShareKey(args) => args.execute(),
         Commands::ComputePublicKey {} => {
             todo!("to be implemented")
         }
