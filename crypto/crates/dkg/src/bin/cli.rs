@@ -12,6 +12,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{RistrettoPoint, Scalar, traits::Identity};
 use dkg::biguint_to_hex;
 use dkg::feldman_commitments;
+use dkg::feldman_derived_public_key;
 use dkg::gen_rand_biguint;
 use dkg::gennaro_derive_key_share;
 use dkg::hex_to_biguint;
@@ -62,10 +63,8 @@ enum Commands {
     /// received from each of other participants
     VerifyPedersen(VerifyPedersen),
     VerifyFeldman(VerifyFeldman),
-    /// Derive key share of each play from received shares by other players.
-    /// x_i = sum(s_ji)
-    DeriveShareKey(DeriveKeyShare),
-    ComputePublicKey {},
+    /// Derive share key and public key
+    DeriveKeys(DeriveKeys),
 }
 
 #[derive(Args, Debug)]
@@ -277,21 +276,31 @@ impl VerifyFeldman {
 }
 
 #[derive(Debug, Args)]
-struct DeriveKeyShare {
+struct DeriveKeys {
     #[arg(long)]
     participant_id: usize,
 }
 
-impl DeriveKeyShare {
-    fn execute(self) -> Result<(), String> {
+impl DeriveKeys {
+    fn execute(&self) -> Result<(), String> {
         let files = ParticipantFiles::new(self.participant_id);
         let received = files.read_received()?;
+
+        // derive share key
         let mut shares: Vec<BigUint> = vec![];
         for (_, (_, ParticipantShare { s, u: _ })) in received.shares_from.iter().enumerate() {
             shares.push(hex_to_biguint(&s)?);
         }
-        let result = gennaro_derive_key_share(shares)?;
-        files.write_share_key(&result)?;
+        files.write_share_key(&gennaro_derive_key_share(shares)?)?;
+
+        // derive public key
+        let mut commitments: Vec<BigUint> = vec![];
+        for (_, (_, commitments_hex)) in received.feldman_commitments.iter().enumerate() {
+            for (_, c) in commitments_hex.iter().enumerate() {
+                commitments.push(hex_to_biguint(c)?);
+            }
+        }
+        files.write_public_key(&feldman_derived_public_key(commitments)?)?;
         Ok(())
     }
 }
@@ -445,6 +454,7 @@ impl ParticipantFiles {
         if metadata.len() == 0 {
             let default = ParticipantDerived {
                 share_key: String::new(),
+                public_key: None,
             };
             let json_data = serde_json::to_string_pretty(&default)
                 .map_err(|e| format!("cannot serialize default derived file data, error: {}", e))?;
@@ -489,6 +499,27 @@ impl ParticipantFiles {
             .map_err(|e| format!("cannot write derived data, error: {}", e))?;
         Ok(())
     }
+
+    fn write_public_key(&self, value: &BigUint) -> Result<(), String> {
+        // ensure file data is created
+        self.ensure_derived_file()?;
+
+        // read and update data
+        let mut data = self.read_derived()?;
+        data.public_key = Some(biguint_to_hex(value));
+
+        // overwrite with new data
+        let file = File::create(self.derived_filepath.to_string()).map_err(|e| {
+            format!(
+                "attempt to createa and truncate derived file to write new data, got error: {}",
+                e
+            )
+        })?; // File::create also truncates
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, &data)
+            .map_err(|e| format!("cannot write derived data, error: {}", e))?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -501,6 +532,7 @@ struct ParticipantReceived {
 #[derive(Serialize, Deserialize, Debug)]
 struct ParticipantDerived {
     share_key: String,
+    public_key: Option<String>,
 }
 
 fn cli_parse_biguint(s: &str) -> Result<BigUint, String> {
@@ -513,16 +545,13 @@ fn cli_parse_biguint(s: &str) -> Result<BigUint, String> {
 
 fn main() -> Result<(), String> {
     let args = Cli::parse();
-    let fmt = &args.number_format;
-    let _verbose = args.verbose;
+    // let fmt = &args.number_format;
+    // let _verbose = args.verbose;
 
     match args.command {
         Commands::GenerateShares(args) => args.execute(),
         Commands::VerifyPedersen(args) => args.execute(),
         Commands::VerifyFeldman(args) => args.execute(),
-        Commands::DeriveShareKey(args) => args.execute(),
-        Commands::ComputePublicKey {} => {
-            todo!("to be implemented")
-        }
+        Commands::DeriveKeys(args) => args.execute(),
     }
 }
