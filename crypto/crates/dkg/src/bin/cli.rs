@@ -63,10 +63,8 @@ enum Commands {
     /// received from each of other participants
     VerifyPedersen(VerifyPedersen),
     VerifyFeldman(VerifyFeldman),
-    /// Derive key share of each play from received shares by other players.
-    /// x_i = sum(s_ji)
-    DeriveShareKey(DeriveKeyShare),
-    DerivePublicKey(DerivePublicKey),
+    /// Derive share key and public key
+    DeriveKeys(DeriveKeys),
 }
 
 #[derive(Args, Debug)]
@@ -278,43 +276,31 @@ impl VerifyFeldman {
 }
 
 #[derive(Debug, Args)]
-struct DeriveKeyShare {
+struct DeriveKeys {
     #[arg(long)]
     participant_id: usize,
 }
 
-impl DeriveKeyShare {
-    fn execute(self) -> Result<(), String> {
+impl DeriveKeys {
+    fn execute(&self) -> Result<(), String> {
         let files = ParticipantFiles::new(self.participant_id);
         let received = files.read_received()?;
+
+        // derive share key
         let mut shares: Vec<BigUint> = vec![];
         for (_, (_, ParticipantShare { s, u: _ })) in received.shares_from.iter().enumerate() {
             shares.push(hex_to_biguint(&s)?);
         }
-        let result = gennaro_derive_key_share(shares)?;
-        files.write_share_key(&result)?;
-        Ok(())
-    }
-}
+        files.write_share_key(&gennaro_derive_key_share(shares)?)?;
 
-#[derive(Debug, Args)]
-struct DerivePublicKey {
-    #[arg(long)]
-    participant_id: usize,
-}
-
-impl DerivePublicKey {
-    fn execute(&self) -> Result<(), String> {
-        let files = ParticipantFiles::new(self.participant_id);
-        let received = files.read_received()?;
+        // derive public key
         let mut commitments: Vec<BigUint> = vec![];
         for (_, (_, commitments_hex)) in received.feldman_commitments.iter().enumerate() {
             for (_, c) in commitments_hex.iter().enumerate() {
                 commitments.push(hex_to_biguint(c)?);
             }
         }
-        let result = feldman_derived_public_key(commitments)?;
-        files.write_public_key(&result)?;
+        files.write_public_key(&feldman_derived_public_key(commitments)?)?;
         Ok(())
     }
 }
@@ -566,7 +552,6 @@ fn main() -> Result<(), String> {
         Commands::GenerateShares(args) => args.execute(),
         Commands::VerifyPedersen(args) => args.execute(),
         Commands::VerifyFeldman(args) => args.execute(),
-        Commands::DeriveShareKey(args) => args.execute(),
-        Commands::DerivePublicKey(args) => args.execute(),
+        Commands::DeriveKeys(args) => args.execute(),
     }
 }
