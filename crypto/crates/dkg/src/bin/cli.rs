@@ -184,17 +184,10 @@ impl VerifyPedersen {
         }
 
         // verify each received share with corresponding pedersen commitments
-        for p_id in 1..=participants {
+        for (_, (p_id, ParticipantShare { s, u })) in received_info.shares_from.iter().enumerate() {
             // get share received from pariticipant p_id
-            let share: (usize, BigUint, BigUint);
-            if let Some(s) = received_info.shares_from.get(&p_id.to_string()).cloned() {
-                share = (participant_id, hex_to_biguint(&s.s)?, hex_to_biguint(&s.u)?);
-            } else {
-                return Err(format!(
-                    "cannot load share of pariticipant {} from received data of participant {}",
-                    p_id, participant_id
-                ));
-            }
+            let share: (usize, BigUint, BigUint) =
+                (participant_id, hex_to_biguint(&s)?, hex_to_biguint(&u)?);
 
             // get corresponding received from pariticipant p_id
             let mut pedersen_commitments: Vec<BigUint> = vec![];
