@@ -25,6 +25,15 @@ pub fn gennaro_derive_key_share(shares: Vec<BigUint>) -> Result<BigUint, String>
     ));
 }
 
+pub fn feldman_derived_public_key(commitments: Vec<BigUint>) -> Result<BigUint, String> {
+    return Ok(scalar_to_biguint(
+        &commitments
+            .iter()
+            .map(|v| biguint_to_scalar(&v))
+            .fold(Scalar::ZERO, |sum, a| sum + a),
+    ));
+}
+
 /// WARNING: if n > 252-bit value (l), function will perform n mod l
 /// because Ristretto255 works under l ~ 252-bit value
 pub fn biguint_to_scalar(n: &BigUint) -> Scalar {
