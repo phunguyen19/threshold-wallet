@@ -72,7 +72,6 @@ Implements distributed key generation where participants jointly generate a shar
 - Feldman commitment generation and verification
 - Pedersen share verification across participants
 - Key share derivation (`x_i = sum(s_ji)`)
-- CLI tooling: `generate-shares`, `verify-pedersen`, `verify-feldman`, `derive-key-share`
 
 **In progress**:
 
@@ -127,4 +126,3 @@ cargo run -p dkg -- generate-shares --participant-id 1 --participants 3 --thresh
 ## License
 
 MIT
-
