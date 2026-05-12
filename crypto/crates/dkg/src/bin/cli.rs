@@ -13,6 +13,7 @@ use curve25519_dalek::{RistrettoPoint, Scalar, traits::Identity};
 use dkg::biguint_to_hex;
 use dkg::feldman_commitments;
 use dkg::feldman_derived_public_key;
+use dkg::feldman_verify;
 use dkg::gen_rand_biguint;
 use dkg::gennaro_derive_key_share;
 use dkg::hex_to_biguint;
@@ -237,13 +238,9 @@ impl VerifyFeldman {
         let received = files.read_received()?;
 
         for (_, (sender_id, commitments_str)) in received.feldman_commitments.iter().enumerate() {
-            // calculate commitment value
-            let mut commitment_value = RistrettoPoint::identity(); // (0,0)
-            let j = Scalar::from(self.participant_id as u64);
-            let mut j_pow_k = Scalar::ONE;
+            let mut commitments: Vec<BigUint> = vec![];
             for v in commitments_str {
-                commitment_value += hex_to_ristretto_point(&v)? * j_pow_k;
-                j_pow_k *= j;
+                commitments.push(hex_to_biguint(&v)?);
             }
 
             // calculate share value
@@ -252,15 +249,14 @@ impl VerifyFeldman {
                 .get(sender_id)
                 .cloned()
                 .ok_or(format!("cannot read share from {}", sender_id))?;
-            let share_value = G * hex_to_scalar(&share.s)?;
+
+            let result =
+                feldman_verify(self.participant_id, commitments, hex_to_biguint(&share.s)?)?;
 
             // Compare
             println!(
                 "Sender: {}, Result: {}, Commitment Value: {}, Share Value: {}",
-                sender_id,
-                commitment_value == share_value,
-                ristretto_point_to_hex(&commitment_value),
-                ristretto_point_to_hex(&share_value)
+                sender_id, result.0, result.1, result.2
             );
         }
 
