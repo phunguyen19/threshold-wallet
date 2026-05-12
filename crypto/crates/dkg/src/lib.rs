@@ -1,5 +1,6 @@
 use curve25519_dalek::{
     RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, ristretto::CompressedRistretto,
+    traits::Identity,
 };
 use num_bigint::BigUint;
 use num_bigint::RandBigInt;
@@ -14,6 +15,31 @@ pub fn feldman_commitments(coeffs: Vec<BigUint>) -> Vec<BigUint> {
         .iter()
         .map(|v| ristretto_point_to_biguint(&(G * &biguint_to_scalar(&v))))
         .collect()
+}
+
+/// Verify Feldman VSS
+pub fn feldman_verify(
+    participant_id: usize,
+    commitments: Vec<BigUint>,
+    share: BigUint,
+) -> Result<(bool, BigUint, BigUint), String> {
+    // calculate commitment value
+    let mut commitment_value = RistrettoPoint::identity(); // (0,0)
+    let j = Scalar::from(participant_id as u64);
+    let mut j_pow_k = Scalar::ONE;
+    for v in commitments {
+        commitment_value += biguint_to_ristretto_point(&v)? * j_pow_k;
+        j_pow_k *= j;
+    }
+
+    // calculate share value
+    let share_value = G * biguint_to_scalar(&share);
+
+    Ok((
+        commitment_value == share_value,
+        ristretto_point_to_biguint(&commitment_value),
+        ristretto_point_to_biguint(&share_value),
+    ))
 }
 
 pub fn gennaro_derive_key_share(shares: Vec<BigUint>) -> Result<BigUint, String> {
