@@ -10,6 +10,7 @@ use std::path::Path;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use curve25519_dalek::{RistrettoPoint, Scalar, traits::Identity};
+use dkg::QUALFeldmanCommitments;
 use dkg::biguint_to_hex;
 use dkg::feldman_commitments;
 use dkg::feldman_derived_public_key;
@@ -283,13 +284,17 @@ impl DeriveKeys {
         files.write_share_key(&gennaro_derive_key_share(shares)?)?;
 
         // derive public key
-        let mut commitments: Vec<BigUint> = vec![];
-        for (_, (_, commitments_hex)) in received.feldman_commitments.iter().enumerate() {
-            for (_, c) in commitments_hex.iter().enumerate() {
-                commitments.push(hex_to_biguint(c)?);
-            }
+        let mut commitments: HashMap<String, BigUint> = HashMap::new();
+        for (p_id, c_hex_vec) in received.feldman_commitments {
+            let c_hex = c_hex_vec.get(0).ok_or(format!(
+                "cannot get feldman commitment of participant {}",
+                p_id
+            ))?;
+            commitments.insert(p_id, hex_to_biguint(c_hex)?);
         }
-        files.write_public_key(&feldman_derived_public_key(commitments)?)?;
+        files.write_public_key(&feldman_derived_public_key(QUALFeldmanCommitments(
+            commitments,
+        ))?)?;
         Ok(())
     }
 }

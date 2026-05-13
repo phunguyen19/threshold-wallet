@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use curve25519_dalek::{
     RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, ristretto::CompressedRistretto,
     traits::Identity,
@@ -51,11 +53,17 @@ pub fn gennaro_derive_key_share(shares: Vec<BigUint>) -> Result<BigUint, String>
     ));
 }
 
-pub fn feldman_derived_public_key(commitments: Vec<BigUint>) -> Result<BigUint, String> {
+// <participant_id, feldman_commitment_ai0>
+#[derive(Debug)]
+pub struct QUALFeldmanCommitments(pub HashMap<String, BigUint>);
+
+pub fn feldman_derived_public_key(commitments: QUALFeldmanCommitments) -> Result<BigUint, String> {
+    println!("{:?}", commitments);
     return Ok(scalar_to_biguint(
         &commitments
+            .0
             .iter()
-            .map(|v| biguint_to_scalar(&v))
+            .map(|(_, v)| biguint_to_scalar(&v))
             .fold(Scalar::ZERO, |sum, a| sum + a),
     ));
 }
