@@ -53,17 +53,21 @@ pub fn gennaro_derive_key_share(shares: Vec<BigUint>) -> Result<BigUint, String>
     ));
 }
 
-// <participant_id, feldman_commitment_ai0>
-#[derive(Debug)]
-pub struct QUALFeldmanCommitments(pub HashMap<String, BigUint>);
-
-pub fn feldman_derived_public_key(commitments: QUALFeldmanCommitments) -> Result<BigUint, String> {
-    println!("{:?}", commitments);
+pub fn feldman_derived_public_key(
+    commitments: HashMap<String, Vec<BigUint>>,
+) -> Result<BigUint, String> {
+    let mut a_i0_vec: Vec<BigUint> = vec![];
+    for (p_id, v) in commitments.iter() {
+        a_i0_vec.push(
+            v.get(0)
+                .ok_or(format!("participant {} has no commitments", p_id))?
+                .clone(),
+        );
+    }
     return Ok(scalar_to_biguint(
-        &commitments
-            .0
+        &a_i0_vec
             .iter()
-            .map(|(_, v)| biguint_to_scalar(&v))
+            .map(|v| biguint_to_scalar(v))
             .fold(Scalar::ZERO, |sum, a| sum + a),
     ));
 }
@@ -119,6 +123,21 @@ pub fn hex_to_biguint(s: &str) -> Result<BigUint, String> {
         BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
     } else {
         BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
+    }
+}
+
+pub struct HexVec(pub Vec<String>);
+pub struct BigUintVec(pub Vec<BigUint>);
+
+impl TryFrom<HexVec> for BigUintVec {
+    type Error = String;
+
+    fn try_from(value: HexVec) -> Result<Self, Self::Error> {
+        let mut ret = BigUintVec(vec![]);
+        for s in value.0 {
+            ret.0.push(hex_to_biguint(&s)?);
+        }
+        Ok(ret)
     }
 }
 

@@ -9,8 +9,8 @@ use std::io::Write;
 use std::path::Path;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use curve25519_dalek::{RistrettoPoint, Scalar, traits::Identity};
-use dkg::QUALFeldmanCommitments;
+use dkg::BigUintVec;
+use dkg::HexVec;
 use dkg::biguint_to_hex;
 use dkg::feldman_commitments;
 use dkg::feldman_derived_public_key;
@@ -18,14 +18,10 @@ use dkg::feldman_verify;
 use dkg::gen_rand_biguint;
 use dkg::gennaro_derive_key_share;
 use dkg::hex_to_biguint;
-use dkg::hex_to_ristretto_point;
-use dkg::hex_to_scalar;
-use dkg::ristretto_point_to_hex;
 use num_bigint::BigUint;
 use num_traits::Num;
 use serde::Deserialize;
 use serde::Serialize;
-use vss::G;
 use vss::VerifyParams;
 
 #[derive(Parser, Debug)]
@@ -284,17 +280,14 @@ impl DeriveKeys {
         files.write_share_key(&gennaro_derive_key_share(shares)?)?;
 
         // derive public key
-        let mut commitments: HashMap<String, BigUint> = HashMap::new();
+        let mut commitments: HashMap<String, Vec<BigUint>> = HashMap::new();
         for (p_id, c_hex_vec) in received.feldman_commitments {
-            let c_hex = c_hex_vec.get(0).ok_or(format!(
-                "cannot get feldman commitment of participant {}",
-                p_id
-            ))?;
-            commitments.insert(p_id, hex_to_biguint(c_hex)?);
+            commitments.insert(
+                p_id,
+                <HexVec as TryInto<BigUintVec>>::try_into(HexVec(c_hex_vec))?.0,
+            );
         }
-        files.write_public_key(&feldman_derived_public_key(QUALFeldmanCommitments(
-            commitments,
-        ))?)?;
+        files.write_public_key(&feldman_derived_public_key(commitments)?)?;
         Ok(())
     }
 }
