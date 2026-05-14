@@ -9,19 +9,19 @@ use std::io::Write;
 use std::path::Path;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use dkg::BigUintVec;
-use dkg::HexVec;
-use dkg::biguint_to_hex;
 use dkg::feldman_commitments;
 use dkg::feldman_derived_public_key;
 use dkg::feldman_verify;
-use dkg::gen_rand_biguint;
 use dkg::gennaro_derive_key_share;
-use dkg::hex_to_biguint;
 use num_bigint::BigUint;
 use num_traits::Num;
 use serde::Deserialize;
 use serde::Serialize;
+use utils::BigUintVec;
+use utils::HexVec;
+use utils::biguint_to_hex;
+use utils::gen_rand_biguint;
+use utils::hex_to_biguint;
 use vss::VerifyParams;
 
 #[derive(Parser, Debug)]

@@ -1,11 +1,13 @@
 use std::sync::LazyLock;
 
 use curve25519_dalek::{
-    RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, ristretto::CompressedRistretto,
-    traits::Identity,
+    RistrettoPoint, Scalar, constants::RISTRETTO_BASEPOINT_POINT, traits::Identity,
 };
 use num_bigint::BigUint;
 use sha2::Sha512;
+use utils::{
+    biguint_to_ristretto_point, biguint_to_scalar, ristretto_point_to_biguint, scalar_to_biguint,
+};
 
 pub static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
 pub static H: LazyLock<RistrettoPoint> = LazyLock::new(|| {
@@ -151,37 +153,6 @@ pub fn reconstruct(params: ReconstructParams) -> BigUint {
 
         sum + li * yi
     }))
-}
-
-/// WARNING: if n > 252-bit value (l), function will perform n mod l
-/// because Ristretto255 works under l ~ 252-bit value
-fn biguint_to_scalar(n: &BigUint) -> Scalar {
-    let mut b = n.to_bytes_le();
-    b.resize(64, 0u8);
-
-    let r: [u8; 64] = b[..64].try_into().expect("always 64 bytes after resize");
-
-    Scalar::from_bytes_mod_order_wide(&r)
-}
-
-fn scalar_to_biguint(n: &Scalar) -> BigUint {
-    BigUint::from_bytes_le(n.as_bytes())
-}
-
-fn biguint_to_ristretto_point(n: &BigUint) -> Result<RistrettoPoint, String> {
-    let bytes = n.to_bytes_le();
-    let mut buf = [0u8; 32];
-    if bytes.len() > 32 {
-        return Err("commitment too large for 32-byte point".into());
-    }
-    buf[..bytes.len()].copy_from_slice(&bytes);
-    CompressedRistretto(buf)
-        .decompress()
-        .ok_or_else(|| format!("invalid compressed point for value {}", n))
-}
-
-fn ristretto_point_to_biguint(n: &RistrettoPoint) -> BigUint {
-    BigUint::from_bytes_le(n.compress().as_bytes())
 }
 
 #[cfg(test)]
