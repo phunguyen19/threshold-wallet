@@ -1,4 +1,4 @@
-use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint, Scalar};
+use curve25519_dalek::{RistrettoPoint, Scalar, ristretto::CompressedRistretto};
 use num_bigint::BigUint;
 use num_bigint::RandBigInt;
 use num_traits::Num;
