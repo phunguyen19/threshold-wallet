@@ -1,22 +1,14 @@
 use std::collections::HashMap;
-use std::error::Error;
-use std::fs;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::BufReader;
-use std::io::BufWriter;
-use std::io::Write;
-use std::path::Path;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 use dkg::feldman_commitments;
 use dkg::feldman_derived_public_key;
 use dkg::feldman_verify;
 use dkg::gennaro_derive_key_share;
+use dkg::output::ParticipantFiles;
+use dkg::output::ParticipantGenerated;
+use dkg::output::ParticipantShare;
 use num_bigint::BigUint;
-use num_traits::Num;
-use serde::Deserialize;
-use serde::Serialize;
 use utils::BigUintVec;
 use utils::HexVec;
 use utils::biguint_to_hex;
@@ -30,27 +22,8 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    #[arg(long, global = true, value_enum, default_value_t = NumberFormat::Hex)]
-    number_format: NumberFormat,
-
     #[arg(long, global = true)]
     verbose: bool,
-}
-
-#[derive(Debug, Clone, ValueEnum)]
-#[clap(rename_all = "lower")]
-enum NumberFormat {
-    Hex,
-    Dec,
-}
-
-impl NumberFormat {
-    fn format(&self, n: &BigUint) -> String {
-        match self {
-            Self::Hex => format!("{:#x}", n),
-            Self::Dec => format!("{}", n),
-        }
-    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -289,244 +262,6 @@ impl DeriveKeys {
         }
         files.write_public_key(&feldman_derived_public_key(commitments)?)?;
         Ok(())
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ParticipantGenerated {
-    id: usize,
-    pedersen_commitments: Vec<String>,
-    feldman_commitments: Vec<String>,
-    shares_to: HashMap<String, ParticipantShare>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ParticipantShare {
-    s: String,
-    u: String,
-}
-
-struct ParticipantFiles {
-    generated_filepath: String,
-    received_filepath: String,
-    derived_filepath: String,
-}
-
-impl ParticipantFiles {
-    fn new(id: usize) -> Self {
-        ParticipantFiles {
-            generated_filepath: format!("output/participant-{}/generated.json", id),
-            received_filepath: format!("output/participant-{}/received.json", id),
-            derived_filepath: format!("output/participant-{}/derived.json", id),
-        }
-    }
-
-    fn write_generated(
-        &self,
-        participant_generated: ParticipantGenerated,
-    ) -> Result<(), Box<dyn Error>> {
-        let path = Path::new(self.generated_filepath.as_str());
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let file = File::create(path)?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &participant_generated)?;
-        Ok(())
-    }
-
-    fn read_generated(&self) -> Result<ParticipantGenerated, Box<dyn Error>> {
-        let file = File::open(&self.generated_filepath)?;
-        let reader = BufReader::new(file);
-        let participant: ParticipantGenerated = serde_json::from_reader(reader)?;
-        Ok(participant)
-    }
-
-    fn ensure_received_file_exists(&self) -> Result<File, Box<dyn Error>> {
-        // ensure parent dir is created
-        let path = Path::new(self.received_filepath.as_str());
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // create file for write
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true) // Create if missing; do nothing if exists
-            .open(self.received_filepath.as_str())?;
-
-        // write default data if file is new created
-        let metadata = file.metadata()?;
-        if metadata.len() == 0 {
-            let default = ParticipantReceived {
-                pedersen_commitments: HashMap::new(),
-                feldman_commitments: HashMap::new(),
-                shares_from: HashMap::new(),
-            };
-            let json_data = serde_json::to_string_pretty(&default)?;
-            file.write_all(json_data.as_bytes())?;
-        }
-
-        Ok(file)
-    }
-
-    fn append_received(
-        &self,
-        from_participant_id: String,
-        pedersent_commitments: Vec<String>,
-        feldman_commitments: Vec<String>,
-        shares: ParticipantShare,
-    ) -> Result<(), Box<dyn Error>> {
-        // ensure file is created
-        self.ensure_received_file_exists()?;
-
-        // read received to append data
-        let mut result = self.read_received()?;
-
-        // append/override data
-        result
-            .shares_from
-            .insert(from_participant_id.clone(), shares);
-        result
-            .pedersen_commitments
-            .insert(from_participant_id.clone(), pedersent_commitments);
-        result
-            .feldman_commitments
-            .insert(from_participant_id.clone(), feldman_commitments);
-
-        // overwrite with new data
-        let file = File::create(self.received_filepath.to_string())?; // File::create also truncates
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &result)?;
-        Ok(())
-    }
-
-    fn read_received(&self) -> Result<ParticipantReceived, String> {
-        let file = File::open(&self.received_filepath)
-            .map_err(|e| format!("cannot open received file, error: {}", e))?;
-        let reader = BufReader::new(file);
-        let result: ParticipantReceived = serde_json::from_reader(reader)
-            .map_err(|e| format!("cannot read received file, error: {}", e))?;
-        Ok(result)
-    }
-
-    fn ensure_derived_file(&self) -> Result<File, String> {
-        // create file for write
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true) // Create if missing; do nothing if exists
-            .open(self.derived_filepath.as_str())
-            .map_err(|e| format!("cannot open derived file, error: {}", e))?;
-
-        let read = self.read_derived();
-        if read.is_ok() {
-            return Ok(file);
-        }
-
-        // ensure parent dir is created
-        let path = Path::new(self.derived_filepath.as_str());
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                format!(
-                    "cannot create participant folder for derived file, error: {}",
-                    e
-                )
-            })?;
-        }
-
-        // write default data if file is new created
-        let metadata = file
-            .metadata()
-            .map_err(|e| format!("cannot read derived file metadata, error: {}", e))?;
-        if metadata.len() == 0 {
-            let default = ParticipantDerived {
-                share_key: String::new(),
-                public_key: None,
-            };
-            let json_data = serde_json::to_string_pretty(&default)
-                .map_err(|e| format!("cannot serialize default derived file data, error: {}", e))?;
-            file.write_all(json_data.as_bytes())
-                .map_err(|e| format!("cannot write default data to derived file, error: {}", e))?;
-        }
-
-        Ok(file)
-    }
-
-    fn read_derived(&self) -> Result<ParticipantDerived, String> {
-        let file = File::open(&self.derived_filepath)
-            .map_err(|e| format!("cannot open derived file, error: {}", e))?;
-        let reader = BufReader::new(file);
-        let result: ParticipantDerived = serde_json::from_reader(reader)
-            .map_err(|e| format!("cannot read derived file, error: {}", e))?;
-        Ok(result)
-    }
-
-    fn read_share_key(&self) -> Result<BigUint, String> {
-        let derived = self.read_derived()?;
-        Ok(hex_to_biguint(&derived.share_key)?)
-    }
-
-    fn write_share_key(&self, value: &BigUint) -> Result<(), String> {
-        // ensure file data is created
-        self.ensure_derived_file()?;
-
-        // read and update data
-        let mut data = self.read_derived()?;
-        data.share_key = biguint_to_hex(value);
-
-        // overwrite with new data
-        let file = File::create(self.derived_filepath.to_string()).map_err(|e| {
-            format!(
-                "attempt to createa and truncate derived file to write new data, got error: {}",
-                e
-            )
-        })?; // File::create also truncates
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &data)
-            .map_err(|e| format!("cannot write derived data, error: {}", e))?;
-        Ok(())
-    }
-
-    fn write_public_key(&self, value: &BigUint) -> Result<(), String> {
-        // ensure file data is created
-        self.ensure_derived_file()?;
-
-        // read and update data
-        let mut data = self.read_derived()?;
-        data.public_key = Some(biguint_to_hex(value));
-
-        // overwrite with new data
-        let file = File::create(self.derived_filepath.to_string()).map_err(|e| {
-            format!(
-                "attempt to createa and truncate derived file to write new data, got error: {}",
-                e
-            )
-        })?; // File::create also truncates
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &data)
-            .map_err(|e| format!("cannot write derived data, error: {}", e))?;
-        Ok(())
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ParticipantReceived {
-    pedersen_commitments: HashMap<String, Vec<String>>,
-    feldman_commitments: HashMap<String, Vec<String>>,
-    shares_from: HashMap<String, ParticipantShare>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ParticipantDerived {
-    share_key: String,
-    public_key: Option<String>,
-}
-
-fn cli_parse_biguint(s: &str) -> Result<BigUint, String> {
-    if let Some(x) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        BigUint::from_str_radix(x, 16).map_err(|e| e.to_string())
-    } else {
-        BigUint::from_str_radix(s, 10).map_err(|e| e.to_string())
     }
 }
 

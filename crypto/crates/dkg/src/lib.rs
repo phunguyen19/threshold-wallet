@@ -9,6 +9,8 @@ use utils::biguint_to_scalar;
 use utils::ristretto_point_to_biguint;
 use utils::scalar_to_biguint;
 
+pub mod output;
+
 static G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
 
 /// Generate Feldman VSS Commitments
