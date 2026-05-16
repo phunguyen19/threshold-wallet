@@ -41,15 +41,15 @@ pub struct ParticipantDerived {
     pub public_key: Option<String>,
 }
 
-pub struct ParticipantFiles {
-    pub generated_filepath: String,
-    pub received_filepath: String,
-    pub derived_filepath: String,
+pub struct Output {
+    generated_filepath: String,
+    received_filepath: String,
+    derived_filepath: String,
 }
 
-impl ParticipantFiles {
+impl Output {
     pub fn new(id: usize) -> Self {
-        ParticipantFiles {
+        Output {
             generated_filepath: format!("output/participant-{}/generated.json", id),
             received_filepath: format!("output/participant-{}/received.json", id),
             derived_filepath: format!("output/participant-{}/derived.json", id),
@@ -58,7 +58,10 @@ impl ParticipantFiles {
 
     pub fn write_generated(
         &self,
-        participant_generated: ParticipantGenerated,
+        id: usize,
+        pedersen_commitments: Vec<String>,
+        feldman_commitments: Vec<String>,
+        shares_to: HashMap<String, ParticipantShare>,
     ) -> Result<(), Box<dyn Error>> {
         let path = Path::new(self.generated_filepath.as_str());
         if let Some(parent) = path.parent() {
@@ -66,7 +69,15 @@ impl ParticipantFiles {
         }
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &participant_generated)?;
+        serde_json::to_writer_pretty(
+            writer,
+            &ParticipantGenerated {
+                id,
+                pedersen_commitments,
+                feldman_commitments,
+                shares_to,
+            },
+        )?;
         Ok(())
     }
 

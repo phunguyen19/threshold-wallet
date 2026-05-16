@@ -5,7 +5,7 @@ use dkg::feldman_commitments;
 use dkg::feldman_derived_public_key;
 use dkg::feldman_verify;
 use dkg::gennaro_derive_key_share;
-use dkg::output::ParticipantFiles;
+use dkg::output::Output;
 use dkg::output::ParticipantGenerated;
 use dkg::output::ParticipantShare;
 use num_bigint::BigUint;
@@ -70,7 +70,7 @@ impl GenerateShares {
         // Feldman commitments
         let feldman_commitments = feldman_commitments(pedersen_deal_result.coeffs_a);
 
-        let participant_files = ParticipantFiles::new(self.participant_id);
+        let output = Output::new(self.participant_id);
 
         let mut shares_hashmap: HashMap<String, ParticipantShare> = HashMap::new();
         for share in pedersen_deal_result.shares {
@@ -84,9 +84,9 @@ impl GenerateShares {
         }
 
         for i in 1..=self.participants {
-            let participant_received_files = ParticipantFiles::new(i);
+            let output = Output::new(i);
             let received_share = shares_hashmap.get(&i.to_string()).cloned().unwrap();
-            participant_received_files
+            output
                 .append_received(
                     self.participant_id.to_string(),
                     pedersen_deal_result
@@ -103,20 +103,20 @@ impl GenerateShares {
                 .unwrap();
         }
 
-        participant_files
-            .write_generated(ParticipantGenerated {
-                id: self.participant_id,
-                pedersen_commitments: pedersen_deal_result
+        output
+            .write_generated(
+                self.participant_id,
+                pedersen_deal_result
                     .commitments
                     .iter()
                     .map(|v| biguint_to_hex(&v))
                     .collect(),
-                feldman_commitments: feldman_commitments
+                feldman_commitments
                     .iter()
                     .map(|v| biguint_to_hex(&v))
                     .collect(),
-                shares_to: shares_hashmap,
-            })
+                shares_hashmap,
+            )
             .expect("write generated result fail");
 
         println!(
@@ -143,8 +143,8 @@ impl VerifyPedersen {
     fn execute(self) -> Result<(), String> {
         let participant_id = self.participant_id;
         let participants = self.participants;
-        let files = ParticipantFiles::new(participant_id);
-        let received_info = files
+        let output = Output::new(participant_id);
+        let received_info = output
             .read_received()
             .or_else(|err| Err(format!("cannot read participant file, error: {}", err)))?;
 
@@ -204,8 +204,8 @@ struct VerifyFeldman {
 impl VerifyFeldman {
     fn execute(self) -> Result<(), String> {
         // load received
-        let files = ParticipantFiles::new(self.participant_id);
-        let received = files.read_received()?;
+        let output = Output::new(self.participant_id);
+        let received = output.read_received()?;
 
         for (_, (sender_id, commitments_str)) in received.feldman_commitments.iter().enumerate() {
             let mut commitments: Vec<BigUint> = vec![];
@@ -242,15 +242,15 @@ struct DeriveKeys {
 
 impl DeriveKeys {
     fn execute(&self) -> Result<(), String> {
-        let files = ParticipantFiles::new(self.participant_id);
-        let received = files.read_received()?;
+        let output = Output::new(self.participant_id);
+        let received = output.read_received()?;
 
         // derive share key
         let mut shares: Vec<BigUint> = vec![];
         for (_, (_, ParticipantShare { s, u: _ })) in received.shares_from.iter().enumerate() {
             shares.push(hex_to_biguint(&s)?);
         }
-        files.write_share_key(&gennaro_derive_key_share(shares)?)?;
+        output.write_share_key(&gennaro_derive_key_share(shares)?)?;
 
         // derive public key
         let mut commitments: HashMap<String, Vec<BigUint>> = HashMap::new();
@@ -260,7 +260,7 @@ impl DeriveKeys {
                 <HexVec as TryInto<BigUintVec>>::try_into(HexVec(c_hex_vec))?.0,
             );
         }
-        files.write_public_key(&feldman_derived_public_key(commitments)?)?;
+        output.write_public_key(&feldman_derived_public_key(commitments)?)?;
         Ok(())
     }
 }
