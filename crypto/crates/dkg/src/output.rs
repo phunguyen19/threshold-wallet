@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -39,9 +40,11 @@ pub struct ParticipantReceived {
 pub struct ParticipantDerived {
     pub share_key: String,
     pub public_key: Option<String>,
+    pub complaint_pedersen: Option<HashSet<String>>,
 }
 
 pub struct Output {
+    id: usize,
     generated_filepath: String,
     received_filepath: String,
     derived_filepath: String,
@@ -50,6 +53,7 @@ pub struct Output {
 impl Output {
     pub fn new(id: usize) -> Self {
         Output {
+            id,
             generated_filepath: format!("output/participant-{}/generated.json", id),
             received_filepath: format!("output/participant-{}/received.json", id),
             derived_filepath: format!("output/participant-{}/derived.json", id),
@@ -88,29 +92,50 @@ impl Output {
         Ok(participant)
     }
 
-    pub fn ensure_received_file_exists(&self) -> Result<File, Box<dyn Error>> {
+    pub fn ensure_received_file_exists(&self) -> Result<File, String> {
         // ensure parent dir is created
         let path = Path::new(self.received_filepath.as_str());
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "cannot create parent folder for {}, error: {}",
+                    self.received_filepath, e
+                )
+            })?;
         }
 
         // create file for write
         let mut file = OpenOptions::new()
             .write(true)
             .create(true) // Create if missing; do nothing if exists
-            .open(self.received_filepath.as_str())?;
+            .open(self.received_filepath.as_str())
+            .map_err(|e| format!("cannot open file {}, error: {}", self.received_filepath, e))?;
 
         // write default data if file is new created
-        let metadata = file.metadata()?;
+        let metadata = file.metadata().map_err(|e| {
+            format!(
+                "cannot read metadata of file {}, error: {}",
+                self.received_filepath, e
+            )
+        })?;
         if metadata.len() == 0 {
             let default = ParticipantReceived {
                 pedersen_commitments: HashMap::new(),
                 feldman_commitments: HashMap::new(),
                 shares_from: HashMap::new(),
             };
-            let json_data = serde_json::to_string_pretty(&default)?;
-            file.write_all(json_data.as_bytes())?;
+            let json_data = serde_json::to_string_pretty(&default).map_err(|e| {
+                format!(
+                    "cannot serialize data for {}, error: {}",
+                    self.received_filepath, e
+                )
+            })?;
+            file.write_all(json_data.as_bytes()).map_err(|e| {
+                format!(
+                    "cannot write data for {}, error: {}",
+                    self.received_filepath, e
+                )
+            })?;
         }
 
         Ok(file)
@@ -188,6 +213,7 @@ impl Output {
             let default = ParticipantDerived {
                 share_key: String::new(),
                 public_key: None,
+                complaint_pedersen: None,
             };
             let json_data = serde_json::to_string_pretty(&default)
                 .map_err(|e| format!("cannot serialize default derived file data, error: {}", e))?;
@@ -212,6 +238,33 @@ impl Output {
         Ok(hex_to_biguint(&derived.share_key)?)
     }
 
+    fn write_derived(&self, data: &ParticipantDerived) -> Result<(), String> {
+        // overwrite with new data
+        let file = File::create(self.derived_filepath.to_string()).map_err(|e| {
+            format!(
+                "attempt to createa and truncate derived file to write new data, got error: {}",
+                e
+            )
+        })?; // file::create also truncates
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, data)
+            .map_err(|e| format!("cannot write derived data, error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn save_complaint_pedersen(&self, against: String) -> Result<(), String> {
+        // ensure file data is created
+        self.ensure_derived_file()?;
+
+        // read and update data
+        let mut data = self.read_derived()?;
+        let mut newData: HashSet<String> = data.complaint_pedersen.unwrap_or(HashSet::new());
+        newData.insert(against);
+        data.complaint_pedersen = Some(newData);
+
+        self.write_derived(&data)
+    }
+
     pub fn write_share_key(&self, value: &BigUint) -> Result<(), String> {
         // ensure file data is created
         self.ensure_derived_file()?;
@@ -220,17 +273,7 @@ impl Output {
         let mut data = self.read_derived()?;
         data.share_key = biguint_to_hex(value);
 
-        // overwrite with new data
-        let file = File::create(self.derived_filepath.to_string()).map_err(|e| {
-            format!(
-                "attempt to createa and truncate derived file to write new data, got error: {}",
-                e
-            )
-        })?; // File::create also truncates
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &data)
-            .map_err(|e| format!("cannot write derived data, error: {}", e))?;
-        Ok(())
+        self.write_derived(&data)
     }
 
     pub fn write_public_key(&self, value: &BigUint) -> Result<(), String> {
@@ -241,16 +284,6 @@ impl Output {
         let mut data = self.read_derived()?;
         data.public_key = Some(biguint_to_hex(value));
 
-        // overwrite with new data
-        let file = File::create(self.derived_filepath.to_string()).map_err(|e| {
-            format!(
-                "attempt to createa and truncate derived file to write new data, got error: {}",
-                e
-            )
-        })?; // File::create also truncates
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &data)
-            .map_err(|e| format!("cannot write derived data, error: {}", e))?;
-        Ok(())
+        self.write_derived(&data)
     }
 }
