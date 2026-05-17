@@ -34,6 +34,15 @@ pub struct ParticipantReceived {
     pub pedersen_commitments: HashMap<String, Vec<String>>,
     pub feldman_commitments: HashMap<String, Vec<String>>,
     pub shares_from: HashMap<String, ParticipantShare>,
+    // new field that will be used to refactor received structure
+    pub data: Option<HashMap<String, ParticipantSent>>,
+}
+
+// new struct for received data that will be use
+// to refactor the receive data
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ParticipantSent {
+    complaint_pedersen: HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -123,6 +132,7 @@ impl Output {
                 pedersen_commitments: HashMap::new(),
                 feldman_commitments: HashMap::new(),
                 shares_from: HashMap::new(),
+                data: None,
             };
             let json_data = serde_json::to_string_pretty(&default).map_err(|e| {
                 format!(
@@ -147,7 +157,7 @@ impl Output {
         pedersent_commitments: Vec<String>,
         feldman_commitments: Vec<String>,
         shares: ParticipantShare,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), String> {
         // ensure file is created
         self.ensure_received_file_exists()?;
 
@@ -166,9 +176,24 @@ impl Output {
             .insert(from_participant_id.clone(), feldman_commitments);
 
         // overwrite with new data
-        let file = File::create(self.received_filepath.to_string())?; // File::create also truncates
+        self.write_received(&result)
+    }
+
+    fn write_received(&self, received: &ParticipantReceived) -> Result<(), String> {
+        // overwrite with new data
+        let file = File::create(self.received_filepath.to_string()).map_err(|e| {
+            format!(
+                "cannot create file {}, error: {}",
+                self.received_filepath, e
+            )
+        })?; // File::create also truncates
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &result)?;
+        serde_json::to_writer_pretty(writer, &received).map_err(|e| {
+            format!(
+                "cannot write data to file {}, error {}",
+                self.received_filepath, e
+            )
+        })?;
         Ok(())
     }
 
@@ -285,5 +310,22 @@ impl Output {
         data.public_key = Some(biguint_to_hex(value));
 
         self.write_derived(&data)
+    }
+
+    pub fn send_complaint_pedersen(&self, to: usize, against: String) -> Result<(), String> {
+        let receiver = Output::new(to);
+        receiver.received_complaint_pedersen(self.id, against)
+    }
+
+    pub fn received_complaint_pedersen(&self, from: usize, against: String) -> Result<(), String> {
+        self.ensure_received_file_exists()?;
+        let mut received = self.read_received()?;
+        let data = received.data.get_or_insert(HashMap::new());
+        let sent = data.entry(format!("{}", from)).or_insert(ParticipantSent {
+            complaint_pedersen: HashSet::new(),
+        });
+        sent.complaint_pedersen.insert(against);
+
+        self.write_received(&received)
     }
 }

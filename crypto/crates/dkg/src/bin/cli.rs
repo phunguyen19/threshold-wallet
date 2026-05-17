@@ -192,12 +192,12 @@ impl VerifyPedersen {
             if !verify_result.result {
                 output.save_complaint_pedersen(p_id.clone())?;
                 // broadcast complaint
-                // for id in 1..=self.participants {
-                //     output.send_complaint_pedersen(
-                //         id,   // to
-                //         p_id, // against
-                //     );
-                // }
+                for id in 1..=self.participants {
+                    output.send_complaint_pedersen(
+                        id,           // to
+                        p_id.clone(), // against
+                    );
+                }
             }
         }
 
