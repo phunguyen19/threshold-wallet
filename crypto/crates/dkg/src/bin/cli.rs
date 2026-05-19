@@ -6,6 +6,7 @@ use dkg::feldman_derived_public_key;
 use dkg::feldman_verify;
 use dkg::gennaro_derive_key_share;
 use dkg::output::Output;
+use dkg::output::ParticipantSent;
 use dkg::output::ParticipantShare;
 use num_bigint::BigUint;
 use utils::BigUintVec;
@@ -35,6 +36,8 @@ enum Commands {
     VerifyFeldman(VerifyFeldman),
     /// Derive share key and public key
     DeriveKeys(DeriveKeys),
+    // Justify against complaint
+    Justify(Justify),
 }
 
 #[derive(Args, Debug)]
@@ -275,15 +278,57 @@ impl DeriveKeys {
     }
 }
 
+#[derive(Debug, Args)]
+struct Justify {
+    #[arg(long)]
+    participant_id: usize,
+
+    #[arg(long)]
+    participants: usize,
+}
+
+impl Justify {
+    fn execute(&self) -> Result<(), String> {
+        let output = Output::new(self.participant_id);
+
+        // read all complaints about me
+        let received = output.read_received()?;
+        let generated = output.read_generated()?;
+
+        if let Some(data) = received.data {
+            for (complaintor, sent) in data {
+                if sent
+                    .complaint_pedersen
+                    .contains(&self.participant_id.to_string())
+                {
+                    for p_id in 1..=self.participants {
+                        output.send_justification(
+                            p_id,
+                            complaintor,
+                            generated
+                                .shares_to
+                                .get(&complaintor)
+                                .ok_or(format!("no share found for {}", complaintor))?,
+                        )
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 fn main() -> Result<(), String> {
     let args = Cli::parse();
     // let fmt = &args.number_format;
     // let _verbose = args.verbose;
 
     match args.command {
-        Commands::GenerateShares(args) => args.execute(),
-        Commands::VerifyPedersen(args) => args.execute(),
-        Commands::VerifyFeldman(args) => args.execute(),
-        Commands::DeriveKeys(args) => args.execute(),
+        Commands::GenerateShares(cmd) => cmd.execute(),
+        Commands::VerifyPedersen(cmd) => cmd.execute(),
+        Commands::VerifyFeldman(cmd) => cmd.execute(),
+        Commands::DeriveKeys(cmd) => cmd.execute(),
+        Commands::Justify(cmd) => cmd.execute(),
     }
 }

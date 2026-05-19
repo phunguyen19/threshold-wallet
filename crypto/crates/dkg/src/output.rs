@@ -42,8 +42,13 @@ pub struct ParticipantReceived {
 // to refactor the receive data
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ParticipantSent {
-    complaint_pedersen: HashSet<String>,
+    pub complaint_pedersen: HashSet<String>,
+
+    // for_participant_id --> share
+    pub justification: Option<Justification>,
 }
+
+pub type Justification = HashMap<String, ParticipantShare>;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ParticipantDerived {
@@ -94,10 +99,20 @@ impl Output {
         Ok(())
     }
 
-    pub fn read_generated(&self) -> Result<ParticipantGenerated, Box<dyn Error>> {
-        let file = File::open(&self.generated_filepath)?;
+    pub fn read_generated(&self) -> Result<ParticipantGenerated, String> {
+        let file = File::open(&self.generated_filepath).map_err(|e| {
+            format!(
+                "cannot open generated file {}, error: {}",
+                self.generated_filepath, e
+            )
+        })?;
         let reader = BufReader::new(file);
-        let participant: ParticipantGenerated = serde_json::from_reader(reader)?;
+        let participant: ParticipantGenerated = serde_json::from_reader(reader).map_err(|e| {
+            format!(
+                "cannot read generated file {}, error: {}",
+                self.generated_filepath, e
+            )
+        })?;
         Ok(participant)
     }
 
@@ -323,8 +338,39 @@ impl Output {
         let data = received.data.get_or_insert(HashMap::new());
         let sent = data.entry(format!("{}", from)).or_insert(ParticipantSent {
             complaint_pedersen: HashSet::new(),
+            justification: None,
         });
         sent.complaint_pedersen.insert(against);
+
+        self.write_received(&received)
+    }
+
+    pub fn send_justification(
+        &self,
+        to: usize,
+        complaintor: String,
+        shares: ParticipantShare,
+    ) -> Result<(), String> {
+        let receiver = Output::new(to);
+        receiver.receive_justify_commitment(self.id, complaintor, shares)
+    }
+
+    pub fn receive_justify_commitment(
+        &self,
+        from: usize,
+        complaintor: String,
+        share: ParticipantShare,
+    ) -> Result<(), String> {
+        self.ensure_received_file_exists()?;
+        let mut received = self.read_received()?;
+        let data = received.data.get_or_insert(HashMap::new());
+        let sent = data.entry(from.to_string()).or_insert(ParticipantSent {
+            complaint_pedersen: HashSet::new(),
+            justification: Some(HashMap::new()),
+        });
+        let justification = sent.justification.get_or_insert(HashMap::new());
+
+        justification.insert(complaintor, share);
 
         self.write_received(&received)
     }
